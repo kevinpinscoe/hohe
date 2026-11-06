@@ -1,0 +1,31 @@
+# Local and AI tooling state
+**/resume.sh
+**/resume.txt
+**/.claude
+**/.claude/settings.local.json
+**/.codex
+**/ai-wt/
+**/.trash/
+
+# OS and editor artifacts
+**/.DS_Store
+**/Thumbs.db
+**/*.swp
+**/.idea/workspace.xml
+**/.idea/shelf/
+**/.idea/httpRequests/
+**/.idea/dataSources.local.xml
+**/.idea/caches/
+**/.obsidian/workspace.json
+**/.obsidian/graph.json
+**/.obsidian/plugins/*/data.json
+
+# Python
+**/*.pyc
+**/*.pyo
+**/__pycache__/
+
+# Node and build output
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
