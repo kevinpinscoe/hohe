@@ -1,0 +1,49 @@
+name: App CI
+
+# Tests for the HOHE Phase 3 application (server/). Also called by the image workflow
+# before publishing.
+on:
+  pull_request:
+    paths:
+      - "server/**"
+      - ".github/workflows/app-*.yml"
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    strategy:
+      matrix:
+        # LibreWolf's resistFingerprinting reports a spoofed UTC+0 zone (Atlantic/Reykjavik);
+        # the planner day must not depend on the process zone either way.
+        tz: ["UTC", "Atlantic/Reykjavik", "America/Los_Angeles"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: server/go.mod
+          cache: false
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        env:
+          TZ: ${{ matrix.tz }}
+        run: go test -race -count=1 ./...
+
+      - name: govulncheck
+        if: matrix.tz == 'UTC'
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

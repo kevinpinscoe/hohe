@@ -21,6 +21,11 @@ grocery store", designed to be ADHD-friendly.
 
 Neither is the HOHE application.
 
+**Phase 3, the HOHE application, is in progress** in `server/`: the Go server with SQLite
+storage, the full task model, rollover with carry history, operation-based sync with a
+conflict tray, soft delete with purge, suggestions, login and the capture API. Its PWA client
+is not yet built. See [server/README.md](server/README.md).
+
 ## Purpose
 
 Most to-do lists show every task at once. HOHE follows the paper planner method instead:
@@ -108,6 +113,17 @@ explicit one).
 Container images are published to `ghcr.io/kevinpinscoe/hohe`, tagged `sha-<commit>`, by
 `.github/workflows/spike-image.yml`. See [RUNBOOK.md](RUNBOOK.md).
 
+## The Phase 3 Server
+
+```bash
+cd server
+go test -race ./...     # domain, store, API and guard tests
+go run ./cmd/hohe help  # subcommands: serve, healthcheck, snapshot, verify-snapshot, init-data, hash-password
+```
+
+The API, the operations it accepts, its configuration and its data files are described in
+[server/README.md](server/README.md).
+
 ## Repository Layout
 
 ```text
@@ -138,7 +154,20 @@ hohe/
 │   ├── web/static/        # the PWA: app, sync queue, IndexedDB, service worker
 │   ├── web/test/          # client unit tests (node --test)
 │   └── Dockerfile
-├── .github/workflows/     # spike CI and image publishing
+├── server/                # Phase 3 application server (Go, SQLite)
+│   ├── cmd/hohe/          # the server and its maintenance subcommands
+│   ├── cmd/hohe-capture/  # capture helper for voice capture through a Claude Code session
+│   ├── internal/domain/   # task model, ranks, rollover, sync and conflicts, purge, suggestions
+│   ├── internal/store/    # SQLite persistence, history, snapshots, login sessions
+│   ├── internal/app/      # the service: model, store and clock under one lock
+│   ├── internal/api/      # HTTP API, login, capture API, static PWA
+│   ├── internal/auth/     # password check, rate limit, session and capture tokens
+│   ├── internal/guard/    # storage guard: refuses an absent or wrong data directory
+│   ├── internal/config/   # runtime configuration file
+│   ├── internal/plannerday/ # planner day in an explicit time zone
+│   ├── web/               # embedded PWA (placeholder until the client is built)
+│   └── README.md
+├── .github/workflows/     # CI (spike, app) and spike image publishing
 ├── compose.yml            # run the spike image
 ├── example-config.json    # every spike config key
 ├── install.sh / uninstall.sh
@@ -173,7 +202,9 @@ Changes are made on a feature branch and merged through a pull request. Before c
 
 The prototype stores nothing outside the browser and sends nothing over the network. The spike
 has **no application login**: anyone who can reach its port can read and change its synthetic
-data, so run it only where network access is already restricted, and never with real data. Do
+data, so run it only where network access is already restricted, and never with real data.
+The Phase 3 server requires a login for its API, accepts captures only with a configured
+capture token, and stores only hashes of the password and tokens. Do
 not put real personal data in screenshots, fixtures or issues; use synthetic tasks.
 
 ## License
