@@ -1,6 +1,6 @@
 // Service worker: the app shell is served from cache so the PWA opens offline.
 // /api/* and /healthz always go to the network; the app handles failures itself.
-const CACHE = "hohe-spike-shell-v1";
+const CACHE = "hohe-spike-shell-v2";
 const SHELL = ["/", "/index.html", "/style.css", "/app.js", "/sync.js", "/plannerday.js", "/idb.js",
   "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/apple-touch-icon.png"];
 

@@ -32,6 +32,12 @@ export function applyResults(queue, results) {
   return queue.filter((op) => !decided.has(op.id));
 }
 
+// Number of later edits held with a conflict. Tolerates a missing or null list, so one odd
+// server record can never stop the conflict tray from rendering.
+export function heldCount(conflict) {
+  return Array.isArray(conflict?.heldOps) ? conflict.heldOps.length : 0;
+}
+
 export function syncLabel(queue, online) {
   if (queue.length === 0) return online ? "All synced" : "All synced (offline)";
   return `${queue.length} change${queue.length === 1 ? "" : "s"} waiting to sync`;

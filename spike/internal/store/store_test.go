@@ -1,6 +1,8 @@
 package store
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -165,5 +167,21 @@ func TestPlannerDayMismatchFlagged(t *testing.T) {
 	r := one(t, s, Op{ID: "c", Type: "capture", Value: "x", ClientPlannerDay: "2026-11-05"})
 	if !r.PlannerDayMismatch || r.ServerPlannerDay != "2026-11-06" || r.Task.PlannerDay != "2026-11-06" {
 		t.Fatalf("mismatch handling: %+v", r)
+	}
+}
+
+// A conflict with no held edits must list them as [] in the snapshot, not null: the PWA's
+// conflict tray read .length on it and failed to render (found on the iPhone, POE-71).
+func TestSnapshotHeldOpsIsEmptyListNotNull(t *testing.T) {
+	s := newStore(t)
+	one(t, s, Op{ID: "d-1", DeviceID: "desktop", Type: "edit", TaskID: "seed-1", Field: "title", Value: "Desktop", BaseRevision: rev(1)})
+	one(t, s, Op{ID: "p-1", DeviceID: "phone", Type: "edit", TaskID: "seed-1", Field: "title", Value: "Phone", BaseRevision: rev(1)})
+	_, cs, _ := s.Snapshot()
+	b, err := json.Marshal(cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"heldOps":[]`) || strings.Contains(string(b), `"heldOps":null`) {
+		t.Fatalf("heldOps not an empty list: %s", b)
 	}
 }
