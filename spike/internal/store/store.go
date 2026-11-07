@@ -187,7 +187,9 @@ func (s *Store) Snapshot() ([]*Task, []*ConflictEntry, Stats) {
 	cs := make([]*ConflictEntry, 0, len(s.corder))
 	for _, id := range s.corder {
 		c := *s.conflicts[id]
-		c.HeldOps = append([]Op(nil), c.HeldOps...)
+		// Copy into a non-nil slice: an empty list must encode as [] (not null), which the
+		// client renders directly.
+		c.HeldOps = append([]Op{}, c.HeldOps...)
 		cs = append(cs, &c)
 	}
 	return tasks, cs, s.stats

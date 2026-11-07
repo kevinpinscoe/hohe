@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { captureOp, editOp, applyResults, syncLabel } from "../static/sync.js";
+import { captureOp, editOp, applyResults, syncLabel, heldCount } from "../static/sync.js";
 
 const task = { id: "seed-1", revisions: { title: 3, notes: 1, priority: 1 } };
 
@@ -33,4 +33,12 @@ test("decided ops leave the queue; undecided ops stay", () => {
 test("sync label", () => {
   assert.equal(syncLabel([], true), "All synced");
   assert.equal(syncLabel([{}, {}, {}], false), "3 changes waiting to sync");
+});
+
+test("heldCount tolerates a null or missing held-edit list", () => {
+  assert.equal(heldCount({ heldOps: null }), 0);
+  assert.equal(heldCount({}), 0);
+  assert.equal(heldCount(undefined), 0);
+  assert.equal(heldCount({ heldOps: [] }), 0);
+  assert.equal(heldCount({ heldOps: [{ id: "a" }, { id: "b" }] }), 2);
 });

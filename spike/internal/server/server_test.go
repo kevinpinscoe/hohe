@@ -87,6 +87,15 @@ func TestConflictAndKeepServer(t *testing.T) {
 	if r["status"] != "conflict" {
 		t.Fatalf("want conflict: %v", r)
 	}
+	sr, err := http.Get(ts.URL + "/api/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sb, _ := io.ReadAll(sr.Body)
+	sr.Body.Close()
+	if strings.Contains(string(sb), `"heldOps":null`) || !strings.Contains(string(sb), `"heldOps":[]`) {
+		t.Fatalf("/api/state heldOps must be [] for a conflict with no held edits: %s", sb)
+	}
 	c := post(t, ts.URL+"/api/conflicts/"+r["conflictId"].(string)+"/keep-server", nil)
 	if c["status"] != "resolved-server" {
 		t.Fatalf("keep server: %v", c)

@@ -1,7 +1,7 @@
 // HOHE Phase 2 spike client. Synthetic data only.
 import { kv } from "./idb.js";
 import { plannerDay, defaultTimeZone } from "./plannerday.js";
-import { newId, captureOp, editOp, applyResults, syncLabel } from "./sync.js";
+import { newId, captureOp, editOp, applyResults, syncLabel, heldCount } from "./sync.js";
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -78,7 +78,7 @@ function render() {
       el("div", {}, `Task ${c.taskId}, field ${c.field}`),
       el("div", {}, "Server (kept): ", el("strong", {}, c.serverValue), ` (rev ${c.serverRevision})`),
       el("div", {}, "Your edit: ", el("strong", {}, c.proposedValue), ` (based on rev ${c.baseRevision})`),
-      c.heldOps.length ? el("div", { class: "meta" }, `${c.heldOps.length} later edit(s) held with it`) : "",
+      heldCount(c) ? el("div", { class: "meta" }, `${heldCount(c)} later edit(s) held with it`) : "",
       el("button", { type: "button", onclick: () => keepServer(c) }, "Keep server value"), " ",
       el("button", { type: "button", onclick: () => useMine(c) }, "Use mine")));
   }
