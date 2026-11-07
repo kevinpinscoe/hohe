@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="HOHE">
+  <meta name="theme-color" content="#3d5a40">
+  <title>HOHE spike</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header>
+    <h1>HOHE <small>Phase 2 spike — synthetic data only</small></h1>
+    <p id="sync-state" class="pill">Loading…</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Capture</h2>
+      <form id="capture">
+        <input id="capture-title" name="title" autocomplete="off" maxlength="200" placeholder="Task title (synthetic)" required>
+        <button type="submit">Capture</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>Tasks <small id="planner-day"></small></h2>
+      <ul id="tasks"></ul>
+    </section>
+
+    <section>
+      <h2>Conflict tray</h2>
+      <ul id="conflicts"><li class="muted">Nothing waiting.</li></ul>
+    </section>
+
+    <section>
+      <h2>Spike controls</h2>
+      <div class="controls">
+        <button id="sync-now" type="button">Sync now</button>
+        <label><input id="pause-sync" type="checkbox"> Pause sync (simulate offline)</label>
+        <button id="replay-last" type="button">Resend last batch (duplicate test)</button>
+        <button id="refresh" type="button">Refresh from server</button>
+      </div>
+      <p id="last-result" class="muted"></p>
+    </section>
+
+    <section>
+      <h2>Diagnostics</h2>
+      <dl id="diag"></dl>
+    </section>
+  </main>
+  <footer id="footer" class="muted"></footer>
+</body>
+</html>

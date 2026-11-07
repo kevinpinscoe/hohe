@@ -9,10 +9,17 @@ grocery store", designed to be ADHD-friendly.
 
 ## Status
 
-**Proof of concept: visual prototype.** This repository currently contains only a clickable
-visual prototype that runs in the browser with **synthetic, invented tasks**. There is no
-backend, no server-side storage, no synchronization and no real data. The prototype exists so
-the daily workflow can be seen and accepted before the real application is built.
+**Proof of concept.** This repository contains two throwaway pieces, both using only
+**synthetic, invented tasks** and no real data:
+
+- `prototype/` — the clickable visual prototype (Phase 1). It runs entirely in the browser.
+- `spike/` — the **Phase 2 technical spike**: a minimal Go API and a minimal installable PWA
+  that test offline capture, duplicate-safe replay of queued operations, a same-field edit
+  conflict sent to a conflict tray, and the planner-day boundary computed in an explicit time
+  zone. Its server keeps data **in memory only**, so restarting it loses everything; durable
+  storage is not part of the spike.
+
+Neither is the HOHE application.
 
 ## Purpose
 
@@ -81,6 +88,26 @@ What to try:
 | Reserved ranks | Reorder the A group: the completed A1 keeps its number, and no number is used twice |
 | C Review with one suggestion | C Review: "Plan it" plans a C task without changing its letter |
 
+## The Phase 2 Spike
+
+Run it locally (Go 1.27 and Node 24 are pinned in `mise.toml`):
+
+```bash
+cd spike
+go test -race ./...                         # server tests
+TZ=UTC node --test 'web/test/*.test.mjs'    # client tests, under a UTC default zone
+go run ./cmd/hohe-spike -config ../example-config.json
+```
+
+Open `http://127.0.0.1:8080/`. The page shows the sync state ("All synced" or "N changes
+waiting to sync"), the conflict tray, spike controls (pause sync to simulate offline, resend
+the last batch to prove duplicates are recognised) and a diagnostics panel (persistent
+storage, installed state, the browser's default time zone and the planner day computed in the
+explicit one).
+
+Container images are published to `ghcr.io/kevinpinscoe/hohe`, tagged `sha-<commit>`, by
+`.github/workflows/spike-image.yml`. See [RUNBOOK.md](RUNBOOK.md).
+
 ## Repository Layout
 
 ```text
@@ -103,10 +130,23 @@ hohe/
 │       ├── seed.ts        # synthetic demonstration tasks
 │       ├── main.tsx
 │       └── styles.css
+├── spike/                 # Phase 2 technical spike (Go API + minimal PWA)
+│   ├── cmd/hohe-spike/    # entry point: --version, --healthcheck, -config
+│   ├── internal/store/    # in-memory store: ops, revisions, replay, conflict tray
+│   ├── internal/plannerday/ # planner day in an explicit time zone
+│   ├── internal/server/   # JSON API and static PWA
+│   ├── web/static/        # the PWA: app, sync queue, IndexedDB, service worker
+│   ├── web/test/          # client unit tests (node --test)
+│   └── Dockerfile
+├── .github/workflows/     # spike CI and image publishing
+├── compose.yml            # run the spike image
+├── example-config.json    # every spike config key
+├── install.sh / uninstall.sh
 ├── .gitignore
 ├── LICENSE
 ├── mise.toml
-└── README.md
+├── README.md
+└── RUNBOOK.md
 ```
 
 ## How It Works
@@ -131,8 +171,10 @@ Changes are made on a feature branch and merged through a pull request. Before c
 
 ## Security
 
-The prototype stores nothing outside the browser and sends nothing over the network. Do not put
-real personal data in screenshots, fixtures or issues; use synthetic tasks.
+The prototype stores nothing outside the browser and sends nothing over the network. The spike
+has **no application login**: anyone who can reach its port can read and change its synthetic
+data, so run it only where network access is already restricted, and never with real data. Do
+not put real personal data in screenshots, fixtures or issues; use synthetic tasks.
 
 ## License
 
