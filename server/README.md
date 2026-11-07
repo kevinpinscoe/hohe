@@ -164,6 +164,7 @@ The tests cover proposal §15:
 - The login password and capture tokens are configured as hashes. Session tokens are stored
   as hashes. None appears in logs.
 - Logins are rate limited: five failures in 15 minutes lock logins for 15 minutes.
+- Changing the login password (its configured hash) ends every session at the next start.
 - Responses carry a strict Content-Security-Policy, `nosniff`, `no-referrer` and
   `frame-ancestors 'none'`.
 

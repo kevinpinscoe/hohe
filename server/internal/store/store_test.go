@@ -171,3 +171,31 @@ func TestSessions(t *testing.T) {
 		t.Fatal("unknown session accepted")
 	}
 }
+
+func TestSessionsResetOnCredentialChange(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if reset, _ := s.ResetIfCredentialChanged("fp1"); !reset {
+		t.Fatal("first start should record the fingerprint")
+	}
+	s.Create("h1", "phone", now, now.Add(time.Hour))
+	if reset, _ := s.ResetIfCredentialChanged("fp1"); reset {
+		t.Fatal("unchanged credential reset sessions")
+	}
+	if err := s.Touch("h1", now, now.Add(time.Hour)); err != nil {
+		t.Fatal("session lost without a credential change")
+	}
+	s.Close()
+	s, _ = OpenSessions(dir)
+	defer s.Close()
+	if reset, _ := s.ResetIfCredentialChanged("fp2"); !reset {
+		t.Fatal("changed credential did not reset")
+	}
+	if err := s.Touch("h1", now, now.Add(time.Hour)); err != ErrNoSession {
+		t.Fatal("session survived a password change")
+	}
+}

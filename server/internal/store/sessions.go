@@ -18,7 +18,8 @@ func OpenSessions(dir string) (*Sessions, error) {
 		return nil, err
 	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS sessions (
-		hash TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, last_seen TEXT NOT NULL, label TEXT NOT NULL)`); err != nil {
+		hash TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, last_seen TEXT NOT NULL, label TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS sessions_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -68,6 +69,33 @@ func (s *Sessions) Delete(hash string) error {
 func (s *Sessions) DeleteAll() error {
 	_, err := s.db.Exec(`DELETE FROM sessions`)
 	return err
+}
+
+// ResetIfCredentialChanged ends every session when the login credential's fingerprint differs
+// from the one recorded when the sessions were created, then records the new one. Changing
+// the login password therefore logs every device out. It reports whether a reset happened.
+func (s *Sessions) ResetIfCredentialChanged(fingerprint string) (bool, error) {
+	var cur string
+	err := s.db.QueryRow(`SELECT value FROM sessions_meta WHERE key = 'credential'`).Scan(&cur)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	if err == nil && cur == fingerprint {
+		return false, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM sessions`); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(`INSERT INTO sessions_meta (key, value) VALUES ('credential', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, fingerprint); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 // Prune removes expired sessions.

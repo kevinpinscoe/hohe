@@ -106,6 +106,13 @@ func serve(args []string) error {
 		return err
 	}
 	defer sessions.Close()
+	// A changed login password ends every session (the fingerprint is of the configured
+	// bcrypt hash, never of the password).
+	if reset, err := sessions.ResetIfCredentialChanged(auth.Hash(cfg.LoginPasswordBcrypt)); err != nil {
+		return err
+	} else if reset {
+		log.Info("login credential changed or first start: all sessions ended")
+	}
 	svc, err := app.New(db, time.Now)
 	if err != nil {
 		return err
