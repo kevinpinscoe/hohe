@@ -26,6 +26,13 @@ async function login(p: Page) {
   await expect(chip(p)).toHaveText('All synced');
 }
 
+/** Offline loading needs the service worker installed and its shell cached first. */
+async function waitForOfflineShell(p: Page) {
+  await p.evaluate(() => navigator.serviceWorker.ready);
+  await expect.poll(() => p.evaluate(() => !!navigator.serviceWorker.controller), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => p.evaluate(async () => (await caches.keys()).some((k) => k.startsWith('hohe-app-'))), { timeout: 20_000 }).toBe(true);
+}
+
 async function capture(p: Page, title: string) {
   await p.getByLabel('Capture a task to the Task Dump').fill(title);
   await p.getByRole('button', { name: 'Capture', exact: true }).click();
@@ -50,6 +57,7 @@ async function openDumpRow(p: Page, title: string) {
 
 test('capture offline → edit → assign B1 → reload → reconnect', async ({ page }) => {
   await login(page);
+  await waitForOfflineShell(page);
   await srv.stop();
 
   await capture(page, 'Renew passport');
