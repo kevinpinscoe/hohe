@@ -35,13 +35,22 @@ func New(db *store.Store, now func() time.Time) (*Service, error) {
 	return s, nil
 }
 
-// day is the current server planner day. Call with s.mu held.
-func (s *Service) day(now time.Time) string {
+// planner returns the time zone and rollover the planner day is computed with, and whether
+// they are the configured settings (false: the settings are unusable and the defaults
+// America/New_York 03:00 are in force). Call with s.mu held.
+func (s *Service) planner() (*time.Location, plannerday.Rollover, bool) {
 	loc, r, err := s.st.Settings.Location()
 	if err != nil {
 		loc, _ = time.LoadLocation("America/New_York")
 		r, _ = plannerday.ParseRollover("03:00")
+		return loc, r, false
 	}
+	return loc, r, true
+}
+
+// day is the current server planner day. Call with s.mu held.
+func (s *Service) day(now time.Time) string {
+	loc, r, _ := s.planner()
 	return plannerday.Day(now, loc, r)
 }
 
@@ -204,26 +213,45 @@ func (s *Service) Export() (Export, error) {
 }
 
 // Health is what /healthz reports.
+//
+// The planner timing fields let an outside monitor judge rollover without knowing the
+// settings: the current planner day began at PlannerDayStart (an RFC 3339 instant in UTC),
+// computed from PlannerTimeZone and Rollover exactly as the planner day itself is. While
+// RolloverCurrent is false, the rollover for that day has not run yet; how long after
+// PlannerDayStart that becomes a failure is the monitor's decision. PlannerSettingsValid
+// is false when the stored settings cannot be used and the defaults are in force.
 type Health struct {
-	OK               bool   `json:"ok"`
-	ServerPlannerDay string `json:"serverPlannerDay"`
-	LastRolled       string `json:"lastRolled"`
-	RolloverCurrent  bool   `json:"rolloverCurrent"`
-	OpenConflicts    int    `json:"openConflicts"`
+	OK                   bool   `json:"ok"`
+	ServerPlannerDay     string `json:"serverPlannerDay"`
+	LastRolled           string `json:"lastRolled"`
+	RolloverCurrent      bool   `json:"rolloverCurrent"`
+	OpenConflicts        int    `json:"openConflicts"`
+	PlannerTimeZone      string `json:"plannerTimeZone"`
+	Rollover             string `json:"rollover"`
+	PlannerDayStart      string `json:"plannerDayStart"`
+	PlannerSettingsValid bool   `json:"plannerSettingsValid"`
 }
 
-// Health reports whether the rollover for the current planner day has run.
+// Health reports whether the rollover for the current planner day has run, and when that
+// planner day began.
 func (s *Service) Health() Health {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	d := s.day(s.Now())
+	loc, r, valid := s.planner()
+	d := plannerday.Day(s.Now(), loc, r)
+	start := ""
+	if t, err := plannerday.Start(d, loc, r); err == nil {
+		start = t.UTC().Format(time.RFC3339)
+	}
 	n := 0
 	for _, c := range s.st.Conflicts {
 		if c.Status == "open" {
 			n++
 		}
 	}
-	return Health{OK: true, ServerPlannerDay: d, LastRolled: s.st.LastRolled, RolloverCurrent: s.st.LastRolled == d, OpenConflicts: n}
+	return Health{OK: true, ServerPlannerDay: d, LastRolled: s.st.LastRolled, RolloverCurrent: s.st.LastRolled == d,
+		OpenConflicts: n, PlannerTimeZone: loc.String(), Rollover: r.String(), PlannerDayStart: start,
+		PlannerSettingsValid: valid}
 }
 
 // Snapshot writes a verified consistent snapshot of the database.
