@@ -5,8 +5,10 @@
 
 ## Status
 
-**In development (Phase 3).** The server is complete enough to test end to end; the PWA client
-that uses it is not yet built, so `web/static/` holds a placeholder page.
+**In development (Phase 3).** The server is complete enough to test end to end. Its PWA client
+lives in [`../web/`](../web/); an image build copies the client's `web/dist/` into
+`web/static/` here. The committed `web/static/index.html` is a placeholder for server-only
+builds and tests.
 
 ## Quick Start
 

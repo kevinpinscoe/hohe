@@ -1,0 +1,28 @@
+{
+  "name": "hohe-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "HOHE PWA client (Phase 3)",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "preact": "^10.29.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@preact/preset-vite": "^2.10.6",
+    "@types/node": "^24.19.2",
+    "fake-indexeddb": "^6.2.7",
+    "preact-render-to-string": "^6.8.2",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.7",
+    "vitest": "^5.1.0"
+  }
+}
