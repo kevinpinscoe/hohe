@@ -101,8 +101,27 @@ Changing `loginPasswordBcrypt` ends every session at the next start.
 
 ## Health Check
 
-- `GET /healthz` returns `200` with `{"ok":true,"serverPlannerDay":...,"rolloverCurrent":...,
-  "openConflicts":...}` when the model and store answer.
+- `GET /healthz` returns `200` when the model and store answer, for example:
+
+  ```json
+  {"ok":true,"serverPlannerDay":"2026-11-08","lastRolled":"2026-11-08","rolloverCurrent":true,
+   "openConflicts":0,"plannerTimeZone":"America/New_York","rollover":"03:00",
+   "plannerDayStart":"2026-11-08T08:00:00Z","plannerSettingsValid":true}
+  ```
+
+- **Planner timing**, for monitors that judge rollover without knowing the settings:
+  - `plannerTimeZone` and `rollover` are the settings in force. They are editable in Settings,
+    so a monitor must read them here rather than assume `America/New_York` `03:00`.
+  - `plannerDayStart` is the instant (RFC 3339, UTC) the current planner day began. It is
+    computed with the same function as the planner day itself, so it follows DST: 03:00 New
+    York is `08:00Z` in winter and `07:00Z` in summer. On a night where the rollover's wall
+    time does not exist, it is the first instant the day can begin.
+  - `rolloverCurrent:false` with `serverPlannerDay` already advanced means the day has begun
+    but its rollover has not run yet. The live ticker runs every minute, so this is normal
+    for up to a minute after `plannerDayStart` and a failure well after it. The grace period
+    is the monitor's to choose; `/healthz` never runs a rollover itself.
+  - `plannerSettingsValid:false` means the stored time zone or rollover is unusable and the
+    defaults are in force.
 - The image `HEALTHCHECK` runs `/hohe healthcheck`, which requires that answer (exit `0`),
   every 30 s with 3 retries.
 
@@ -113,7 +132,7 @@ offers:
 
 | Signal | Detail |
 | --- | --- |
-| Health | `GET /healthz` → `"ok":true`; `rolloverCurrent:false` long after the rollover time means rollover is stuck |
+| Health | `GET /healthz` → `"ok":true`; `rolloverCurrent:false` long after `plannerDayStart` means rollover is stuck |
 | Start marker | log line `"msg":"listening"` with version, commit and `persistent` |
 | Rollover | `"msg":"rollover"` with the days processed, after each rollover or catch-up |
 | Conflicts | `openConflicts` in `/healthz` |
@@ -162,6 +181,14 @@ local build: snapshot and verify succeed, and a missing directory fails with exi
 docker compose exec hohe /hohe snapshot --config /config/config.json --out /data/snapshots/hohe-<UTC>.sqlite3
 docker compose exec hohe /hohe verify-snapshot /data/snapshots/hohe-<UTC>.sqlite3   # integrity and counts
 ```
+
+Both print the snapshot's JSON summary, including `createdAt`: when it was taken (RFC 3339,
+UTC, the instant just before `VACUUM INTO` began). It is stored **inside** the snapshot, in a
+one-row `snapshot_meta` table, so copying, pulling or verifying an old snapshot reports its
+real age, never the time of the copy or the check. A file's modification time is not
+evidence of a snapshot's age. A snapshot made before this field existed verifies with an
+empty `createdAt`, which a monitor must treat as unknown, not fresh. A database restored from
+a snapshot keeps the table harmlessly, and its next snapshot replaces it.
 
 **Restore**:
 

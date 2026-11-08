@@ -247,3 +247,47 @@ func TestOriginCheckWhenConfigured(t *testing.T) {
 		t.Fatal("same-origin request refused")
 	}
 }
+
+// /healthz reports the planner timing an outside monitor needs to judge rollover: the
+// time zone and rollover in force, and the instant the current planner day began,
+// computed exactly as the planner day is.
+func TestHealthzPlannerTiming(t *testing.T) {
+	e := newEnv(t)
+	check := func(name, day, start, tz, roll string, current bool) {
+		t.Helper()
+		code, m, raw := e.do("GET", "/healthz", nil, nil)
+		if code != 200 || m["ok"] != true {
+			t.Fatalf("%s: %d %s", name, code, raw)
+		}
+		if m["serverPlannerDay"] != day || m["plannerDayStart"] != start || m["plannerTimeZone"] != tz ||
+			m["rollover"] != roll || m["rolloverCurrent"] != current || m["plannerSettingsValid"] != true {
+			t.Fatalf("%s: %s", name, raw)
+		}
+	}
+	// Defaults, America/New_York 03:00. 2026-11-03 15:00Z is 10:00 EST, so the day began
+	// at 03:00 EST, 08:00Z.
+	check("defaults", "2026-11-03", "2026-11-03T08:00:00Z", "America/New_York", "03:00", true)
+
+	// 02:30 EST the next morning is still the 3rd's planner day.
+	e.now = time.Date(2026, 11, 4, 7, 30, 0, 0, time.UTC)
+	check("before rollover", "2026-11-03", "2026-11-03T08:00:00Z", "America/New_York", "03:00", true)
+
+	// At 03:00 EST the 4th begins. /healthz runs no rollover itself, so until the ticker
+	// does, the new day is reported as begun but not yet rolled: the state a monitor
+	// times against plannerDayStart.
+	e.now = time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC)
+	check("rollover pending", "2026-11-04", "2026-11-04T08:00:00Z", "America/New_York", "03:00", false)
+
+	// Changed settings are reported and used: Europe/London 04:30 (GMT in November).
+	e.login()
+	ops := []map[string]any{
+		{"id": "s1", "type": "setting", "field": "timeZone", "value": "Europe/London", "baseRevision": 0},
+		{"id": "s2", "type": "setting", "field": "rollover", "value": "04:30", "baseRevision": 0},
+	}
+	if code, m, raw := e.do("POST", "/api/sync", map[string]any{"deviceId": "desk", "ops": ops}, client); code != 200 ||
+		m["results"].([]any)[1].(map[string]any)["status"] != "applied" {
+		t.Fatalf("settings: %d %s", code, raw)
+	}
+	e.now = time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	check("changed settings", "2026-11-04", "2026-11-04T04:30:00Z", "Europe/London", "04:30", true)
+}

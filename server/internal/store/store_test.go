@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -197,5 +198,71 @@ func TestSessionsResetOnCredentialChange(t *testing.T) {
 	}
 	if err := s.Touch("h1", now, now.Add(time.Hour)); err != ErrNoSession {
 		t.Fatal("session survived a password change")
+	}
+}
+
+// A snapshot records when it was taken inside itself. Copying it, touching it or verifying
+// it later reports that time, never the file's modification time or the time of the check.
+func TestSnapshotRecordsCreationTime(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	defer s.Close()
+	before := time.Now().UTC().Truncate(time.Second)
+	snap := filepath.Join(t.TempDir(), "hohe-20261108-0705.sqlite3")
+	info, err := s.Snapshot(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := time.Now().UTC()
+	created, err := time.Parse(time.RFC3339, info.CreatedAt)
+	if err != nil || created.Before(before) || created.After(after) {
+		t.Fatalf("createdAt %q not between %v and %v (%v)", info.CreatedAt, before, after, err)
+	}
+	// Make the file look a day newer and copy it, as a pull would: the recorded time stands.
+	future := time.Now().Add(24 * time.Hour)
+	if err := os.Chtimes(snap, future, future); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(snap)
+	copied := filepath.Join(t.TempDir(), "pulled.sqlite3")
+	os.WriteFile(copied, raw, 0o600)
+	again, err := VerifySnapshot(copied)
+	if err != nil || again.CreatedAt != info.CreatedAt {
+		t.Fatalf("verify of a copy: %q, want %q (%v)", again.CreatedAt, info.CreatedAt, err)
+	}
+	// A database restored from a snapshot, snapshotted again, gets a fresh time, not the
+	// inherited one.
+	restoreDir := t.TempDir()
+	os.WriteFile(filepath.Join(restoreDir, DBFile), raw, 0o600)
+	r, err := Open(restoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := r.Load(); err != nil {
+		t.Fatalf("restored database with snapshot_meta does not load: %v", err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	snap2 := filepath.Join(t.TempDir(), "second.sqlite3")
+	info2, err := r.Snapshot(snap2)
+	if err != nil || info2.CreatedAt == "" || info2.CreatedAt <= info.CreatedAt {
+		t.Fatalf("second snapshot createdAt %q, first %q (%v)", info2.CreatedAt, info.CreatedAt, err)
+	}
+}
+
+// A snapshot from before snapshot_meta existed still verifies, with no creation time: the
+// monitor treats an empty createdAt as unknown, never as fresh.
+func TestVerifySnapshotWithoutMeta(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	defer s.Close()
+	snap := filepath.Join(t.TempDir(), "old.sqlite3")
+	if _, err := s.Snapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	db, _ := openDB(snap)
+	db.Exec(`DROP TABLE ` + SnapshotMetaTable)
+	db.Close()
+	info, err := VerifySnapshot(snap)
+	if err != nil || info.CreatedAt != "" {
+		t.Fatalf("old snapshot: %+v %v", info, err)
 	}
 }

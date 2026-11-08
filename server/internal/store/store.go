@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kevinpinscoe/hohe/server/internal/domain"
 
@@ -460,6 +461,12 @@ func (s *Store) History(taskID string, limit int) ([]domain.Event, error) {
 }
 
 // SnapshotInfo describes a verified snapshot.
+//
+// CreatedAt is when the snapshot was taken (RFC 3339, UTC): the instant just before
+// VACUUM INTO began, so the snapshot holds every change committed before it. It is
+// recorded inside the snapshot file (table snapshot_meta), not taken from the file's
+// modification time, so copying, pulling or verifying an old snapshot never makes it
+// look new. It is empty for a snapshot made before this field existed.
 type SnapshotInfo struct {
 	Path       string `json:"path"`
 	Bytes      int64  `json:"bytes"`
@@ -467,10 +474,17 @@ type SnapshotInfo struct {
 	Placements int    `json:"placements"`
 	Events     int    `json:"events"`
 	Schema     int    `json:"schema"`
+	CreatedAt  string `json:"createdAt"`
 }
 
+// SnapshotMetaTable records a snapshot's creation time inside the snapshot itself. It
+// exists only in snapshot files; a database restored from one carries it harmlessly, and
+// every new snapshot replaces it.
+const SnapshotMetaTable = "snapshot_meta"
+
 // Snapshot writes a consistent copy of the live database to dest with VACUUM INTO (never a
-// raw copy of live files), then opens the copy and verifies it.
+// raw copy of live files), records its creation time in the copy, then opens the copy and
+// verifies it.
 func (s *Store) Snapshot(dest string) (SnapshotInfo, error) {
 	if strings.ContainsAny(dest, "'\x00") {
 		return SnapshotInfo{}, errors.New("snapshot path must not contain a quote")
@@ -478,10 +492,35 @@ func (s *Store) Snapshot(dest string) (SnapshotInfo, error) {
 	if _, err := os.Stat(dest); err == nil {
 		return SnapshotInfo{}, fmt.Errorf("%s already exists; snapshots are never overwritten", dest)
 	}
+	created := time.Now().UTC().Format(time.RFC3339)
 	if _, err := s.db.Exec(`VACUUM INTO '` + dest + `'`); err != nil {
 		return SnapshotInfo{}, fmt.Errorf("vacuum into: %w", err)
 	}
+	if err := stampSnapshot(dest, created); err != nil {
+		os.Remove(dest)
+		return SnapshotInfo{}, fmt.Errorf("record snapshot time: %w", err)
+	}
 	return VerifySnapshot(dest)
+}
+
+// stampSnapshot writes the creation time into the new copy, replacing any snapshot_meta it
+// inherited from a database that was itself restored from a snapshot.
+func stampSnapshot(path, created string) error {
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	for _, q := range []string{
+		`DROP TABLE IF EXISTS ` + SnapshotMetaTable,
+		`CREATE TABLE ` + SnapshotMetaTable + ` (created_at TEXT NOT NULL)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			return err
+		}
+	}
+	_, err = db.Exec(`INSERT INTO `+SnapshotMetaTable+` (created_at) VALUES (?)`, created)
+	return err
 }
 
 // VerifySnapshot opens a snapshot read-only and checks its integrity and contents.
@@ -503,6 +542,20 @@ func VerifySnapshot(path string) (SnapshotInfo, error) {
 	}
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&info.Schema); err != nil {
 		return info, err
+	}
+	var meta int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, SnapshotMetaTable).Scan(&meta); err != nil {
+		return info, err
+	}
+	if meta == 1 {
+		var created string
+		if err := db.QueryRow(`SELECT created_at FROM ` + SnapshotMetaTable).Scan(&created); err != nil {
+			return info, fmt.Errorf("snapshot_meta: %w", err)
+		}
+		if _, err := time.Parse(time.RFC3339, created); err != nil {
+			return info, fmt.Errorf("snapshot_meta: created_at %q: %w", created, err)
+		}
+		info.CreatedAt = created
 	}
 	for q, dst := range map[string]*int{
 		`SELECT COUNT(*) FROM tasks`: &info.Tasks, `SELECT COUNT(*) FROM placements`: &info.Placements,
