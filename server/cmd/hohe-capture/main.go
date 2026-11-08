@@ -4,10 +4,21 @@
 //	hohe-capture [--priority A|B|C] [--day YYYY-MM-DD] [--deadline YYYY-MM-DD] [--key KEY] TITLE...
 //
 // A title is the only required input; the task lands in the Task Dump. The optional fields
-// are sent only when given: they are never inferred. Success is printed only after the
-// server accepts the task. Network failures are retried with the same idempotency key, so
-// a retry can never create a duplicate; the key is printed on failure so a manual rerun
-// with --key reuses it.
+// are sent only when given: they are never inferred.
+//
+// Every run ends in exactly one of three outcomes, never mixed up:
+//
+//   - Captured (exit 0): the server's response confirms the task was accepted.
+//   - Not captured (exit 1): the task definitely did not go in. Either the server refused it
+//     with an error, or the request never reached the server (for example, the connection
+//     could not be opened).
+//   - Capture not confirmed (exit 3): the outcome is unknown. The request was sent, but no
+//     confirming response came back (a timeout, a dropped connection, or a 5xx from a proxy
+//     or the server). The server may have accepted the task.
+//
+// Network failures are retried automatically with the same idempotency key. After a failure,
+// the key is printed: rerunning with --key KEY retries the same capture, and the server
+// returns the original result if it already accepted it, so a retry never creates a duplicate.
 //
 // The server is HOHE_URL (or --url). The capture token is read from the file named by
 // HOHE_CAPTURE_TOKEN_FILE (a secrets broker can inject one), or from HOHE_CAPTURE_TOKEN.
@@ -24,6 +35,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"regexp"
 	"strings"
@@ -48,18 +60,75 @@ type response struct {
 	Error    string `json:"error"`
 }
 
+// Outcome of a run.
+type Outcome int
+
+const (
+	Captured     Outcome = iota // confirmed by the server
+	NotCaptured                 // definitely not accepted
+	NotConfirmed                // unknown: sent, but not confirmed
+)
+
+// Exit codes per outcome.
+var exitCode = map[Outcome]int{Captured: 0, NotCaptured: 1, NotConfirmed: 3}
+
+// attemptResult is one HTTP attempt's classification.
+type attemptResult struct {
+	outcome   Outcome
+	retryable bool
+	resp      response
+	detail    string
+}
+
+// config is everything run needs, so tests can drive it.
+type config struct {
+	base     string
+	token    string
+	client   *http.Client
+	attempts int
+	backoff  time.Duration
+	out, err io.Writer
+}
+
 func main() {
 	url := flag.String("url", os.Getenv("HOHE_URL"), "HOHE base URL")
 	pri := flag.String("priority", "", "A, B or C (only if stated)")
 	day := flag.String("day", "", "planned day YYYY-MM-DD (only if stated)")
 	deadline := flag.String("deadline", "", "deadline YYYY-MM-DD (only if stated)")
-	key := flag.String("key", "", "idempotency key (reuse one printed by a failed run)")
+	key := flag.String("key", "", "idempotency key (reuse the one printed by an earlier run)")
 	flag.Parse()
 	title := strings.TrimSpace(strings.Join(flag.Args(), " "))
-	if err := run(*url, request{Title: title, Priority: strings.ToUpper(*pri), Day: *day, Deadline: *deadline, IdempotencyKey: *key}); err != nil {
-		fmt.Fprintln(os.Stderr, "NOT captured:", err)
-		os.Exit(1)
+	req := request{Title: title, Priority: strings.ToUpper(*pri), Day: *day, Deadline: *deadline, IdempotencyKey: *key}
+	if err := validate(*url, req); err != nil {
+		fmt.Fprintln(os.Stderr, "Not captured:", err)
+		os.Exit(exitCode[NotCaptured])
 	}
+	tok, err := token()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Not captured:", err)
+		os.Exit(exitCode[NotCaptured])
+	}
+	cfg := config{base: *url, token: tok, client: &http.Client{Timeout: 15 * time.Second},
+		attempts: 3, backoff: 2 * time.Second, out: os.Stdout, err: os.Stderr}
+	os.Exit(exitCode[run(cfg, req)])
+}
+
+func validate(base string, req request) error {
+	if base == "" {
+		return errors.New("no server: set HOHE_URL or --url")
+	}
+	if req.Title == "" {
+		return errors.New("a title is required")
+	}
+	if req.Priority != "" && req.Priority != "A" && req.Priority != "B" && req.Priority != "C" {
+		return errors.New("priority must be A, B or C")
+	}
+	for _, d := range []string{req.Day, req.Deadline} {
+		if d != "" && !dayRE.MatchString(d) {
+			return fmt.Errorf("%q is not YYYY-MM-DD", d)
+		}
+	}
+	return nil
 }
 
 func token() (string, error) {
@@ -76,66 +145,103 @@ func token() (string, error) {
 	return "", errors.New("no capture token: set HOHE_CAPTURE_TOKEN_FILE")
 }
 
-func run(base string, req request) error {
-	if base == "" {
-		return errors.New("no server: set HOHE_URL or --url")
+func newKey() string {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err)
 	}
-	if req.Title == "" {
-		return errors.New("a title is required")
-	}
-	if req.Priority != "" && req.Priority != "A" && req.Priority != "B" && req.Priority != "C" {
-		return errors.New("priority must be A, B or C")
-	}
-	for _, d := range []string{req.Day, req.Deadline} {
-		if d != "" && !dayRE.MatchString(d) {
-			return fmt.Errorf("%q is not YYYY-MM-DD", d)
+	return hex.EncodeToString(b[:])
+}
+
+// attempt sends the capture once and classifies the result. The request counts as sent
+// once it has been fully written to the connection (httptrace WroteRequest without error):
+// from then on, a failure is ambiguous.
+func attempt(cfg config, body []byte) attemptResult {
+	sent := false
+	trace := &httptrace.ClientTrace{WroteRequest: func(i httptrace.WroteRequestInfo) {
+		if i.Err == nil {
+			sent = true
 		}
-	}
-	tok, err := token()
+	}}
+	hr, err := http.NewRequest("POST", strings.TrimRight(cfg.base, "/")+"/api/capture", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return attemptResult{outcome: NotCaptured, detail: err.Error()}
 	}
+	hr = hr.WithContext(httptrace.WithClientTrace(hr.Context(), trace))
+	hr.Header.Set("Content-Type", "application/json")
+	hr.Header.Set("Authorization", "Bearer "+cfg.token)
+	resp, err := cfg.client.Do(hr)
+	if err != nil {
+		if sent {
+			return attemptResult{outcome: NotConfirmed, retryable: true,
+				detail: "the request was sent but no response came back (" + err.Error() + ")"}
+		}
+		return attemptResult{outcome: NotCaptured, retryable: true,
+			detail: "the request did not reach the server (" + err.Error() + ")"}
+	}
+	raw, rerr := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	resp.Body.Close()
+	var r response
+	_ = json.Unmarshal(raw, &r)
+	switch {
+	case rerr != nil:
+		return attemptResult{outcome: NotConfirmed, retryable: true,
+			detail: "the response was cut off (" + rerr.Error() + ")"}
+	case resp.StatusCode == 200 && r.TaskID != "":
+		return attemptResult{outcome: Captured, resp: r}
+	case resp.StatusCode >= 500:
+		// A proxy timeout (502/504) or a server error: the task may or may not have landed.
+		return attemptResult{outcome: NotConfirmed, retryable: true,
+			detail: fmt.Sprintf("the server answered HTTP %d without a confirmation", resp.StatusCode)}
+	case resp.StatusCode == 200:
+		return attemptResult{outcome: NotConfirmed, retryable: true,
+			detail: "the server answered without a task id"}
+	default:
+		msg := r.Error
+		if msg == "" {
+			msg = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		}
+		return attemptResult{outcome: NotCaptured, detail: "the server refused it: " + msg}
+	}
+}
+
+// run performs the capture with retries and prints exactly one outcome.
+func run(cfg config, req request) Outcome {
 	if req.IdempotencyKey == "" {
-		var b [12]byte
-		rand.Read(b[:])
-		req.IdempotencyKey = hex.EncodeToString(b[:])
+		req.IdempotencyKey = newKey()
 	}
 	body, _ := json.Marshal(req)
-	c := &http.Client{Timeout: 15 * time.Second}
-	var last error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+	var last attemptResult
+	everSent := false
+	for i := 0; i < cfg.attempts; i++ {
+		if i > 0 && cfg.backoff > 0 {
+			time.Sleep(time.Duration(i) * cfg.backoff)
 		}
-		hr, _ := http.NewRequest("POST", strings.TrimRight(base, "/")+"/api/capture", bytes.NewReader(body))
-		hr.Header.Set("Content-Type", "application/json")
-		hr.Header.Set("Authorization", "Bearer "+tok)
-		resp, err := c.Do(hr)
-		if err != nil {
-			last = err // network failure: retry with the same key
-			continue
+		last = attempt(cfg, body)
+		if last.outcome == NotConfirmed {
+			everSent = true
 		}
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-		resp.Body.Close()
-		var r response
-		_ = json.Unmarshal(raw, &r)
-		if resp.StatusCode >= 500 {
-			last = fmt.Errorf("server error %d", resp.StatusCode)
-			continue
+		if !last.retryable {
+			break
 		}
-		if resp.StatusCode != 200 || r.TaskID == "" {
-			msg := r.Error
-			if msg == "" {
-				msg = fmt.Sprintf("HTTP %d", resp.StatusCode)
-			}
-			return errors.New(msg) // the server refused it: not retryable
-		}
-		note := ""
-		if r.Replayed {
-			note = " (already captured earlier; not duplicated)"
-		}
-		fmt.Printf("Captured: %q → %s%s\nTask id: %s\n", r.Title, r.Landed, note, r.TaskID)
-		return nil
 	}
-	return fmt.Errorf("%v (retry with --key %s to avoid a duplicate)", last, req.IdempotencyKey)
+	switch {
+	case last.outcome == Captured:
+		note := ""
+		if last.resp.Replayed {
+			note = " (already captured earlier with this key; not duplicated)"
+		}
+		fmt.Fprintf(cfg.out, "Captured: %q → %s%s\nTask id: %s\n", last.resp.Title, last.resp.Landed, note, last.resp.TaskID)
+		return Captured
+	case everSent && last.retryable:
+		// Some attempt was sent without confirmation, and no later attempt settled it.
+		fmt.Fprintf(cfg.err, "Capture not confirmed: %s.\nThe server may have accepted it. Retry with the same key, which cannot create a duplicate:\n  --key %s\n", last.detail, req.IdempotencyKey)
+		return NotConfirmed
+	default:
+		fmt.Fprintf(cfg.err, "Not captured: %s.\n", last.detail)
+		if last.retryable {
+			fmt.Fprintf(cfg.err, "To retry, use the same key: --key %s\n", req.IdempotencyKey)
+		}
+		return NotCaptured
+	}
 }
