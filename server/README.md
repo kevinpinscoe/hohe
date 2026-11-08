@@ -70,6 +70,20 @@ hohe hash-password < password-on-stdin        # bcrypt hash for the config
 hohe-capture [--priority B] [--day YYYY-MM-DD] [--deadline YYYY-MM-DD] TITLE   # needs HOHE_URL and a token file
 ```
 
+### Capture helper outcomes
+
+`hohe-capture` ends in exactly one of three outcomes:
+
+| Exit | Message | Meaning |
+| --- | --- | --- |
+| 0 | `Captured: "…" → …` | The server's response confirmed the task. A rerun with the same key says "already captured earlier with this key; not duplicated" |
+| 1 | `Not captured: …` | Definitely not accepted: the server refused it, or the request never reached the server |
+| 3 | `Capture not confirmed: …` | Unknown. The request was sent, but no confirming response came back (a timeout, a dropped connection, or a 5xx). The server may have accepted it |
+
+Network failures are retried automatically with the same idempotency key. After a failure,
+the key is printed: rerunning with `--key KEY` retries the same capture without risking a
+duplicate.
+
 ## How It Works
 
 **The model** (`internal/domain`) follows the HOHE proposal:
