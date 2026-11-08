@@ -160,8 +160,8 @@ export function outstandingText(pending: number, rejected: number): string {
 
 /**
  * The guard before logout or clearing (§11.6). Pending changes and rejected actions are never
- * lost by accident: both are counted, exported and named in the discard confirmation, and
- * rejected actions must be exported before Discard is offered. The store rechecks the counts
+ * lost by accident: both are counted, offered for export (with their full content) and named
+ * in the explicit discard confirmation. Exporting is offered, not required. The store rechecks the counts
  * under the sync lock immediately before clearing; if another tab added work after the
  * confirmation, nothing is cleared and this asks again with the new counts.
  */
@@ -175,6 +175,7 @@ export function LeaveDevice(props: { mode: 'logout' | 'clear'; st: Status; store
   const verb = mode === 'logout' ? 'Log out' : 'Clear this device';
   const ids = () => new Set([...st.pending.map((q) => q.op.id), ...st.attention.map((a) => a.id)]);
   const rejectedExported = st.attention.every((a) => exported.has(a.id));
+  const unexported = st.attention.filter((a) => !exported.has(a.id)).length;
 
   const leave = async () => {
     setBusy(true);
@@ -237,15 +238,18 @@ export function LeaveDevice(props: { mode: 'logout' | 'clear'; st: Status; store
               <button class="menu-item" onClick={() => void exportAll()}>
                 Export {[n > 0 ? 'pending changes' : '', r > 0 ? 'rejected actions' : ''].filter(Boolean).join(' and ')} to a file
               </button>
-              {!rejectedExported && <p class="hint">Rejected actions are not on the server. Export them before they can be discarded.</p>}
+              {!rejectedExported && (
+                <p class="hint">Rejected actions are not on the server. Exporting keeps a copy of each one before discarding.</p>
+              )}
               <button
                 class="menu-item danger"
-                disabled={busy || !rejectedExported}
+                disabled={busy}
                 onClick={() => {
                   const what = [n > 0 ? plural(n, 'unsynced change', 'unsynced changes') : '', r > 0 ? plural(r, 'rejected action', 'rejected actions') : '']
                     .filter(Boolean)
                     .join(' and ');
-                  if (!confirm(`Discard ${what} and ${verb.toLowerCase()}? This cannot be undone.`)) return;
+                  const warn = unexported > 0 ? ` ${plural(unexported, 'rejected action has', 'rejected actions have')} not been exported.` : '';
+                  if (!confirm(`Discard ${what} and ${verb.toLowerCase()}? This cannot be undone.${warn}`)) return;
                   void leave();
                 }}
               >

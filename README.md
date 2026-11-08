@@ -255,8 +255,9 @@ never overwrites a queued change.
 - **Sessions.** A login failure stops the sync and keeps the queue. HOHE asks for the password
   and then resumes.
 - **Log out and Clear this device.** Both count pending changes and rejected actions. They
-  offer Sync now, Export to a file, or Discard, and Discard names both counts. Rejected
-  actions must be exported before Discard is offered. Clearing takes the same lock as a sync,
+  offer Sync now, Export to a file, or Discard, and Discard names both counts. Exporting is
+  offered, not required: an explicitly confirmed Discard also warns when rejected actions have
+  not been exported. Clearing takes the same lock as a sync,
   so it waits for a sync in any tab to finish. Immediately before clearing it checks again:
   if another tab added work after the confirmation, nothing is cleared and HOHE asks again
   with the new counts. Each clear moves an epoch counter on, so a sync answer still in flight
