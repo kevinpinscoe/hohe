@@ -438,7 +438,7 @@ test('another tab adds work during the clearing flow: fresh confirmation with th
   expect(calls, 'no tab keeps syncing after logout').toBe(before);
 });
 
-test('zero pending and one rejected action: guarded, exported, then discarded', async ({ browser }) => {
+test('zero pending and one rejected action: guarded, export offered, discard explicitly confirmed', async ({ browser }) => {
   const ctxA = await browser.newContext();
   const ctxB = await browser.newContext();
   const a = await ctxA.newPage();
@@ -468,7 +468,16 @@ test('zero pending and one rejected action: guarded, exported, then discarded', 
   await expect(guard.getByTestId('outstanding')).toHaveText('1 rejected action was refused by the server and never applied.');
   await expect(guard).not.toContainText('Nothing is waiting');
   const discard = guard.getByRole('button', { name: /^Discard 1 rejected action and log out/ });
-  await expect(discard).toBeDisabled();
+  // Export is offered, not mandatory: Discard is available, and its confirmation says nothing was exported.
+  await expect(discard).toBeEnabled();
+  let first = '';
+  b.once('dialog', (d) => {
+    first = d.message();
+    void d.dismiss();
+  });
+  await discard.click();
+  await expect.poll(() => first).toBe('Discard 1 rejected action and log out? This cannot be undone. 1 rejected action has not been exported.');
+  await expect(guard.getByTestId('outstanding')).toHaveText('1 rejected action was refused by the server and never applied.'); // cancelled: nothing removed
 
   const [dl] = await Promise.all([b.waitForEvent('download'), guard.getByRole('button', { name: 'Export rejected actions to a file' }).click()]);
   const doc = JSON.parse(await (await import('node:fs/promises')).readFile((await dl.path())!, 'utf8'));

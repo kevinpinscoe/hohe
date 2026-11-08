@@ -138,8 +138,9 @@ describe('the logout and clear guard', () => {
     expect(html).toContain('1 rejected action was refused by the server');
     expect(html).not.toContain('Nothing is waiting');
     expect(html).toContain('Export rejected actions to a file');
-    expect(html).toContain('Export them before they can be discarded.');
-    expect(html).toMatch(/<button[^>]*disabled[^>]*>Discard 1 rejected action and log out/);
+    expect(html).toContain('Exporting keeps a copy of each one before discarding.');
+    // Export is offered, not required: Discard is available (behind its own confirmation).
+    expect(html).toMatch(/<button class="menu-item danger">Discard 1 rejected action and log out/);
     expect(html).not.toContain('Sync now');
   });
   it('counts both kinds', () => {

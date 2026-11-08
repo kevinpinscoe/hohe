@@ -1,0 +1,9 @@
+# Only web/ and server/ are needed by the image build.
+**/node_modules
+**/dist
+**/test-results
+**/playwright-report
+ai-wt
+prototype
+spike
+.git

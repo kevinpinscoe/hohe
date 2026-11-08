@@ -58,7 +58,7 @@ func main() {
 		err = initData(os.Args[2:])
 	case "hash-password":
 		err = hashPassword()
-	case "version":
+	case "version", "--version", "-v":
 		fmt.Println(version, commit)
 	default:
 		usage()
