@@ -1,6 +1,6 @@
 // App shell: capture bar, navigation, sync status, login and the update prompt.
 
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useState } from 'preact/hooks';
 import { relativeLabel, type Day } from './dates';
 import type { ActOptions, Ctx, DialogSpec, View } from './ctx';
 import { DayPage } from './day';
@@ -20,10 +20,20 @@ interface Toast {
   error?: boolean;
 }
 
+/**
+ * Subscribe to the store. The store starts before this component's effects run, so an update
+ * can arrive before the subscription exists; re-reading `store.current` right after
+ * subscribing means none is missed (a missed "loaded" left the app on "Opening HOHE…").
+ */
 function useStore(store: Store) {
-  const [, setN] = useState(0);
-  useEffect(() => store.subscribe(() => setN((n) => n + 1)), [store]);
-  return store.current;
+  const [snap, setSnap] = useState(store.current);
+  useLayoutEffect(() => {
+    const update = () => setSnap(store.current);
+    const unsubscribe = store.subscribe(update);
+    update();
+    return unsubscribe;
+  }, [store]);
+  return snap;
 }
 
 export function App(props: { store: Store }) {
