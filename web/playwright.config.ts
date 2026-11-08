@@ -19,5 +19,7 @@ export default defineConfig({
     channel: channel === 'chromium' ? undefined : channel,
     headless: true,
     serviceWorkers: 'allow',
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
   },
 });
