@@ -1,0 +1,25 @@
+# HOHE Phase 2 spike. Synthetic, in-memory data only: recreating the container loses it.
+# Pin the image to a digest, e.g.
+#   HOHE_IMAGE=ghcr.io/kevinpinscoe/hohe:sha-<commit>@sha256:<digest> docker compose up -d
+services:
+  hohe:
+    image: ${HOHE_IMAGE:-ghcr.io/kevinpinscoe/hohe}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8080}:8080"
+    volumes:
+      - ./config.json:/config/config.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "/hohe-spike", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

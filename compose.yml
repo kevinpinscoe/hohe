@@ -1,14 +1,16 @@
-# HOHE Phase 2 spike. Synthetic, in-memory data only: recreating the container loses it.
-# Pin the image to a digest, e.g.
-#   HOHE_IMAGE=ghcr.io/kevinpinscoe/hohe:sha-<commit>@sha256:<digest> docker compose up -d
+# HOHE application (Phase 3). Always pin the image to a digest:
+#   HOHE_IMAGE=ghcr.io/kevinpinscoe/hohe:app-sha-<commit>@sha256:<digest> docker compose up -d
+# The data directory must be writable by the image's nonroot user (uid 65532) and, for real
+# data, prepared with `hohe init-data` (see RUNBOOK.md).
 services:
   hohe:
-    image: ${HOHE_IMAGE:-ghcr.io/kevinpinscoe/hohe}
+    image: ${HOHE_IMAGE:?set HOHE_IMAGE to ghcr.io/kevinpinscoe/hohe:app-sha-<commit>@sha256:<digest>}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${HOST_PORT:-8080}:8080"
     volumes:
       - ./config.json:/config/config.json:ro
+      - ${HOHE_DATA_DIR:-./data}:/data
     read_only: true
     tmpfs:
       - /tmp
@@ -16,10 +18,11 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    mem_limit: 128m
+    mem_limit: 256m
+    stop_grace_period: 30s
     healthcheck:
-      test: ["CMD", "/hohe-spike", "--healthcheck"]
+      test: ["CMD", "/hohe", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s

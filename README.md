@@ -27,8 +27,11 @@ Neither is the HOHE application.
   history, operation-based sync with a conflict tray, soft delete with purge, suggestions,
   login and the capture API. See [server/README.md](server/README.md).
 - `web/` — the PWA client, built on the accepted prototype: it works offline, queues every
-  change on the device, and syncs it to the server. The container image, CI publishing and the
-  web1 deployment are still to come.
+  change on the device, and syncs it to the server.
+
+The application image is built and published by CI (`ghcr.io/kevinpinscoe/hohe`, tagged
+`app-sha-<commit>`). Its web1 deployment, monitoring and backups are still to come. See
+[RUNBOOK.md](RUNBOOK.md).
 
 ## Purpose
 
@@ -105,7 +108,7 @@ Run it locally (Go 1.27 and Node 24 are pinned in `mise.toml`):
 cd spike
 go test -race ./...                         # server tests
 TZ=UTC node --test 'web/test/*.test.mjs'    # client tests, under a UTC default zone
-go run ./cmd/hohe-spike -config ../example-config.json
+go run ./cmd/hohe-spike -config example-config.json
 ```
 
 Open `http://127.0.0.1:8080/`. The page shows the sync state ("All synced" or "N changes
@@ -115,7 +118,9 @@ storage, installed state, the browser's default time zone and the planner day co
 explicit one).
 
 Container images are published to `ghcr.io/kevinpinscoe/hohe`, tagged `sha-<commit>`, by
-`.github/workflows/spike-image.yml`. See [RUNBOOK.md](RUNBOOK.md).
+`.github/workflows/spike-image.yml`. The spike's `compose.yml`, `example-config.json`,
+`install.sh`, `uninstall.sh` and runbook are in `spike/`. See
+[spike/RUNBOOK.md](spike/RUNBOOK.md).
 
 ## The Phase 3 Server
 
@@ -176,6 +181,8 @@ hohe/
 │   ├── internal/server/   # JSON API and static PWA
 │   ├── web/static/        # the PWA: app, sync queue, IndexedDB, service worker
 │   ├── web/test/          # client unit tests (node --test)
+│   ├── compose.yml, example-config.json, install.sh, uninstall.sh
+│   ├── RUNBOOK.md         # the spike's operations
 │   └── Dockerfile
 ├── server/                # Phase 3 application server (Go, SQLite)
 │   ├── cmd/hohe/          # the server and its maintenance subcommands
@@ -208,15 +215,17 @@ hohe/
 │   ├── sw/sw.js           # service worker source (version and asset list added at build)
 │   ├── e2e/               # browser tests and the real-server harness (Playwright)
 │   └── public/            # manifest and icons
-├── .github/workflows/     # CI (spike, app server and client) and spike image publishing
-├── compose.yml            # run the spike image
-├── example-config.json    # every spike config key
-├── install.sh / uninstall.sh
+├── .github/workflows/     # CI (spike; app server, client and image build) and image publishing
+├── Dockerfile             # the application image: client + server on distroless
+├── .dockerignore
+├── compose.yml            # run the application image (pinned by digest)
+├── example-config.json    # every application config key
+├── install.sh / uninstall.sh # prepare config and data / stop (data kept)
 ├── .gitignore
 ├── LICENSE
 ├── mise.toml
 ├── README.md
-└── RUNBOOK.md
+└── RUNBOOK.md             # the application's operations
 ```
 
 ## How It Works

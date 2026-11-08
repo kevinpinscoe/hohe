@@ -1,8 +1,12 @@
 {
-  "listen_addr": ":8080",
-  "time_zone": "America/New_York",
-  "rollover": "03:00",
-  "seed_synthetic": true,
-  "allow_reset": false,
-  "log_level": "info"
+  "listen": ":8080",
+  "dataDir": "/data",
+  "persistent": true,
+  "sentinelId": "",
+  "requireMountpoint": false,
+  "loginPasswordBcrypt": "",
+  "captureTokens": [],
+  "publicOrigin": "",
+  "secureCookies": true,
+  "sessionDays": 90
 }

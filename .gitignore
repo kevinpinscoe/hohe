@@ -30,8 +30,10 @@
 **/dist/
 **/*.tsbuildinfo
 
-# Local runtime config for the spike (copied from example-config.json by install.sh)
+# Local runtime config (copied from example-config.json by install.sh) and app data
 /config.json
+/spike/config.json
+/data/
 
 # Browser-test output (web/)
 **/test-results/
