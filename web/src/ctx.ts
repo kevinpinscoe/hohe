@@ -1,5 +1,5 @@
 import type { Day } from './dates';
-import type { Intent } from './intents';
+import type { Baseline, Intent } from './intents';
 import type { State } from './model';
 
 export type View = 'today' | 'dump' | 'review' | 'sync' | 'settings';
@@ -41,4 +41,6 @@ export interface Ctx {
   pendingTasks: Map<string, number>;
   /** Wall-clock now, for "waiting for 12 min". */
   now: number;
+  /** An edit dialog's baseline: field values and revisions as of when it opens. */
+  editBaseline: (taskId: string, fields: string[]) => Baseline;
 }

@@ -225,23 +225,23 @@ function RankPicker(props: { ctx: Ctx; placementId: string }) {
 
 function EditSheet(props: { ctx: Ctx; taskId: string }) {
   const { ctx, taskId } = props;
-  const t = taskById(ctx.s, taskId);
-  const [title, setTitle] = useState(t.title);
-  const [notes, setNotes] = useState(t.notes);
-  const [deadline, setDeadline] = useState<string>(t.deadline ?? '');
-  const [effort, setEffort] = useState<string>(t.effort ?? '');
-  const changes: Record<string, unknown> = {};
-  if (title.trim() !== t.title) changes.title = title.trim();
-  if (notes !== t.notes) changes.notes = notes;
-  if (deadline !== (t.deadline ?? '')) changes.deadline = deadline;
-  if (effort !== (t.effort ?? '')) changes.effort = effort;
-  const dirty = Object.keys(changes).length > 0;
+  // The baseline is fixed when the dialog opens. A refresh while it is open changes neither
+  // the starting values nor the revisions the edit builds on, and only fields the user
+  // actually changed are sent.
+  const [base] = useState(() => ctx.editBaseline(taskId, ['title', 'notes', 'deadline', 'effort']));
+  const v = (f: string) => String(base.values[f] ?? '');
+  const [title, setTitle] = useState(v('title'));
+  const [notes, setNotes] = useState(v('notes'));
+  const [deadline, setDeadline] = useState<string>(v('deadline'));
+  const [effort, setEffort] = useState<string>(v('effort'));
+  const current = { title: title.trim(), notes, deadline, effort };
+  const dirty = Object.entries(current).some(([f, x]) => x !== v(f));
   return (
     <Sheet title="Edit task" onClose={ctx.close}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (dirty) void ctx.act(intents.editMany(taskId, changes), 'Saved');
+          if (dirty) void ctx.act(intents.editFrom(base, current), 'Saved');
         }}
       >
         <label class="field">
@@ -309,10 +309,11 @@ function DelegateSheet(props: { ctx: Ctx; taskId: string }) {
 function AssignSheet(props: { ctx: Ctx; taskId: string }) {
   const { ctx, taskId } = props;
   const t = taskById(ctx.s, taskId);
-  const [letter, setLetter] = useState<Letter | null>(t.priority);
+  const [base] = useState(() => ctx.editBaseline(taskId, ['priority', 'deadline', 'effort']));
+  const [letter, setLetter] = useState<Letter | null>((String(base.values.priority ?? '') || null) as Letter | null);
   const [day, setDay] = useState<Day | null>(null);
-  const [deadline, setDeadline] = useState<Day | ''>(t.deadline ?? '');
-  const [effort, setEffort] = useState<Effort | undefined>(t.effort);
+  const [deadline, setDeadline] = useState<Day | ''>(String(base.values.deadline ?? ''));
+  const [effort, setEffort] = useState<Effort | undefined>((String(base.values.effort ?? '') || undefined) as Effort | undefined);
   return (
     <Sheet title="Assign" onClose={ctx.close}>
       <p class="muted">{t.title}</p>
@@ -340,7 +341,7 @@ function AssignSheet(props: { ctx: Ctx; taskId: string }) {
           class="btn primary"
           onClick={() =>
             ctx.act(
-              intents.assign(taskId, letter, day, deadline, effort),
+              intents.assign(taskId, letter, day, deadline, effort, base),
               day ? `On ${relativeLabel(day, ctx.s.today)} as ${letter ?? 'unlettered'}` : `Triaged as ${letter ?? 'unlettered'}, no day yet`,
             )
           }

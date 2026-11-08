@@ -147,16 +147,58 @@ export function download(name: string, text: string) {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-/** The guard before logout or clearing: pending changes are never lost by accident (§11.6). */
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** What is outstanding on this device, in words: pending changes and rejected actions both count. */
+export function outstandingText(pending: number, rejected: number): string {
+  const parts: string[] = [];
+  if (pending > 0) parts.push(`${plural(pending, 'change has', 'changes have')} not reached the server yet`);
+  if (rejected > 0) parts.push(`${plural(rejected, 'rejected action was', 'rejected actions were')} refused by the server and never applied`);
+  if (parts.length === 0) return 'Nothing is waiting to sync and no rejected actions remain.';
+  return parts.join(', and ') + '.';
+}
+
+/**
+ * The guard before logout or clearing (§11.6). Pending changes and rejected actions are never
+ * lost by accident: both are counted, exported and named in the discard confirmation, and
+ * rejected actions must be exported before Discard is offered. The store rechecks the counts
+ * under the sync lock immediately before clearing; if another tab added work after the
+ * confirmation, nothing is cleared and this asks again with the new counts.
+ */
 export function LeaveDevice(props: { mode: 'logout' | 'clear'; st: Status; store: Store; onDone: () => void }) {
   const { mode, st, store } = props;
+  const [exported, setExported] = useState<Set<string>>(new Set());
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
   const n = st.pending.length;
+  const r = st.attention.length;
   const verb = mode === 'logout' ? 'Log out' : 'Clear this device';
-  const finish = async () => {
-    if (mode === 'logout') await store.logoutAndClear();
-    else await store.clearDevice();
-    props.onDone();
+  const ids = () => new Set([...st.pending.map((q) => q.op.id), ...st.attention.map((a) => a.id)]);
+  const rejectedExported = st.attention.every((a) => exported.has(a.id));
+
+  const leave = async () => {
+    setBusy(true);
+    try {
+      const res = await store.leave(mode, ids());
+      if (res.cleared) {
+        props.onDone();
+        return;
+      }
+      setNotice(
+        `Another tab added work after you confirmed, so nothing was removed. Now ${outstandingText(res.pending.length, res.attention.length).replace(/^./, (c) => c.toLowerCase())} Confirm again.`,
+      );
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const exportAll = async () => {
+    const text = await store.exportPending();
+    download(`hohe-outstanding-${new Date().toISOString().slice(0, 16)}.json`, text);
+    const doc = JSON.parse(text) as { pending: { op: { id: string } }[]; rejected: { id: string }[] };
+    setExported(new Set([...doc.pending.map((q) => q.op.id), ...doc.rejected.map((a) => a.id)]));
+  };
+
   return (
     <div class="overlay">
       <div class="sheet" role="dialog" aria-modal="true" aria-label={verb}>
@@ -166,39 +208,49 @@ export function LeaveDevice(props: { mode: 'logout' | 'clear'; st: Status; store
             ✕
           </button>
         </div>
-        {n === 0 ? (
+        {notice && (
+          <p class="note warn" role="alert">
+            {notice}
+          </p>
+        )}
+        <p data-testid="outstanding">
+          <strong>{outstandingText(n, r)}</strong>
+        </p>
+        {n + r === 0 ? (
           <>
-            <p>Nothing is waiting to sync. This device’s copy of your planner will be removed.</p>
+            <p>This device’s copy of your planner will be removed.</p>
             <div class="sheet-actions">
-              <button class="btn primary" onClick={finish}>
+              <button class="btn primary" disabled={busy} onClick={() => void leave()}>
                 {verb}
               </button>
             </div>
           </>
         ) : (
           <>
-            <p>
-              <strong>
-                {n} {n === 1 ? 'change has' : 'changes have'} not reached the server yet.
-              </strong>{' '}
-              Choose what to do with {n === 1 ? 'it' : 'them'} first.
-            </p>
+            <p>Choose what to do with {n + r === 1 ? 'it' : 'them'} first.</p>
             <div class="menu">
-              <button class="menu-item" onClick={() => void store.sync()}>
-                Sync now
+              {n > 0 && (
+                <button class="menu-item" onClick={() => void store.sync()}>
+                  Sync now
+                </button>
+              )}
+              <button class="menu-item" onClick={() => void exportAll()}>
+                Export {[n > 0 ? 'pending changes' : '', r > 0 ? 'rejected actions' : ''].filter(Boolean).join(' and ')} to a file
               </button>
-              <button class="menu-item" onClick={() => download(`hohe-pending-${new Date().toISOString().slice(0, 16)}.json`, store.exportPending())}>
-                Export pending changes to a file
-              </button>
+              {!rejectedExported && <p class="hint">Rejected actions are not on the server. Export them before they can be discarded.</p>}
               <button
                 class="menu-item danger"
-                onClick={async () => {
-                  if (!confirm(`Discard ${n} unsynced ${n === 1 ? 'change' : 'changes'}? ${n === 1 ? 'It' : 'They'} will be lost for good.`)) return;
-                  await store.discardPending();
-                  await finish();
+                disabled={busy || !rejectedExported}
+                onClick={() => {
+                  const what = [n > 0 ? plural(n, 'unsynced change', 'unsynced changes') : '', r > 0 ? plural(r, 'rejected action', 'rejected actions') : '']
+                    .filter(Boolean)
+                    .join(' and ');
+                  if (!confirm(`Discard ${what} and ${verb.toLowerCase()}? This cannot be undone.`)) return;
+                  void leave();
                 }}
               >
-                Discard {n} pending {n === 1 ? 'change' : 'changes'} and {verb.toLowerCase()}
+                Discard {[n > 0 ? plural(n, 'pending change', 'pending changes') : '', r > 0 ? plural(r, 'rejected action', 'rejected actions') : ''].filter(Boolean).join(' and ')} and{' '}
+                {verb.toLowerCase()}
               </button>
             </div>
           </>

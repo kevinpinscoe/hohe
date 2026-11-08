@@ -5,7 +5,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setRequestTimeout } from './api';
 import * as db from './db';
-import { buildCtx, intents, IntentError, type Intent } from './intents';
+import { buildCtx, editBaseline, intents, IntentError, type Intent } from './intents';
 import { displayState, fromServer } from './local';
 import { openPlacement } from './model';
 import type { Op, Result, SrvView } from './server';
@@ -139,6 +139,59 @@ describe('dependencies', () => {
     const [e] = await enqueue(intents.edit('t1', 'title', 'New'));
     expect(e.op).toMatchObject({ baseRevision: 4 });
     expect(e.op.dependsOn).toBeUndefined();
+  });
+});
+
+describe('edit dialogs keep their opening baseline', () => {
+  it('a refresh while the dialog is open does not rebase the edit, and only changed fields are sent', async () => {
+    await db.saveConfirmed(view({ tasks: [task('t1', 'Old title', { notes: 'old notes', revisions: { title: 2, notes: 5 } })] }));
+    const base = editBaseline(buildCtx(await db.readAll(), TODAY), 't1', ['title', 'notes']);
+    // Another device changes both fields; the refresh arrives while the dialog is open.
+    await db.saveConfirmed(view({ tasks: [task('t1', 'Remote title', { notes: 'remote notes', revisions: { title: 3, notes: 6 } })] }));
+    const out = await enqueue(intents.editFrom(base, { title: 'My title', notes: 'old notes' }));
+    expect(out).toHaveLength(1); // notes untouched by the user: not sent, so the remote notes survive
+    expect(out[0].op).toMatchObject({ field: 'title', value: 'My title', baseRevision: 2 }); // not 3
+  });
+  it('a field following a queued offline op still depends on that op', async () => {
+    const [cap] = await enqueue(intents.capture('Offline task'));
+    const base = editBaseline(buildCtx(await db.readAll(), TODAY), cap.op.taskId!, ['title']);
+    const [e] = await enqueue(intents.editFrom(base, { title: 'Offline task, edited' }));
+    expect(e.op.dependsOn).toBe(cap.op.id);
+  });
+});
+
+describe('clearing the device', () => {
+  it('refuses when work was added after confirmation, and clears what was confirmed', async () => {
+    const [a] = await enqueue(intents.capture('Confirmed'));
+    const confirmed = new Set([a.op.id]);
+    await enqueue(intents.capture('Added by another tab'));
+    const refused = await db.clearDeviceIfConfirmed(confirmed);
+    expect(refused.cleared).toBe(false);
+    expect(refused.pending).toHaveLength(2);
+    expect((await db.readAll()).pending).toHaveLength(2);
+    const all = new Set((await db.readAll()).pending.map((q) => q.op.id));
+    expect((await db.clearDeviceIfConfirmed(all)).cleared).toBe(true);
+    expect((await db.readAll()).pending).toEqual([]);
+  });
+
+  it('a sync answer that arrives after the device was cleared is not stored', async () => {
+    const srv = fakeServer(view());
+    await enqueue(intents.capture('In flight'));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const resp = await srv.fetchImpl(url, init);
+        const ids = new Set((await db.readAll()).pending.map((q) => q.op.id));
+        expect((await db.clearDeviceIfConfirmed(ids)).cleared).toBe(true); // cleared mid-request
+        return resp;
+      }),
+    );
+    const out = await drainQueue('dev');
+    expect(out.kind).toBe('cleared');
+    const snap = await db.readAll();
+    expect(snap.confirmed).toBeNull();
+    expect(snap.pending).toEqual([]);
+    expect(snap.epoch).toBe(1);
   });
 });
 

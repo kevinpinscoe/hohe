@@ -239,6 +239,11 @@ never overwrites a queued change.
 - **Dependencies.** An edit names the queued edit of the same field it builds on, or else the
   revision the server last confirmed. A priority change is always an edit, never part of an
   assignment, so the chain stays unbroken.
+- **Edit dialogs keep their baseline.** An edit or assign dialog records each field's value
+  and base when it opens, and sends only the fields that were actually changed, built on that
+  baseline. A refresh while the dialog is open therefore never rebases the edit: a field
+  changed elsewhere goes to the conflict tray instead of being overwritten, and an untouched
+  field is not sent at all.
 - **One sync at a time.** A Web Lock shared by every tab and the installed app makes sure only
   one of them sends the queue. An operation is removed from the queue in the same transaction
   that stores the server's answer. Closing the app mid-request just resends the operation,
@@ -248,8 +253,15 @@ never overwrites a queued change.
   apply, Apply anyway, Discard), or a rejected action needing attention. "All synced" appears
   only when nothing is in any of the last three.
 - **Sessions.** A login failure stops the sync and keeps the queue. HOHE asks for the password
-  and then resumes. Log out and Clear this device first offer Sync now, Export to a file, or
-  Discard, and Discard names the count.
+  and then resumes.
+- **Log out and Clear this device.** Both count pending changes and rejected actions. They
+  offer Sync now, Export to a file, or Discard, and Discard names both counts. Rejected
+  actions must be exported before Discard is offered. Clearing takes the same lock as a sync,
+  so it waits for a sync in any tab to finish. Immediately before clearing it checks again:
+  if another tab added work after the confirmation, nothing is cleared and HOHE asks again
+  with the new counts. Each clear moves an epoch counter on, so a sync answer still in flight
+  is never stored afterwards. The other tabs stop syncing and ask for login. Clear this device
+  also forgets the device id.
 - **Updates.** Each version caches its own complete shell, and a new version waits until
   "Update now" is chosen; HOHE never reloads by itself. The first install replaces the
   Phase 2 spike's service worker at the same address and deletes the spike's cached files.

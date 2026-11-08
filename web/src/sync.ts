@@ -14,14 +14,14 @@
 //   sent (see intents.ts).
 
 import { api, ApiError } from './api';
-import { commitSync, readAll, rejectLocally, type Attention, type PlacementTarget, type Snapshot } from './db';
+import { commitSync, DeviceClearedError, readAll, rejectLocally, type Attention, type PlacementTarget, type Snapshot } from './db';
 import { isLocalPlacement, type QueuedOp } from './local';
 import { list, type Op, type Result, type SrvView } from './server';
 
 export const MAX_BATCH = 200;
 const MAX_ROUNDS = 50;
 
-export type SyncKind = 'ok' | 'busy' | 'unreachable' | 'unauthorized' | 'refused' | 'server' | 'storage';
+export type SyncKind = 'ok' | 'busy' | 'unreachable' | 'unauthorized' | 'refused' | 'server' | 'storage' | 'cleared';
 
 export interface SyncOutcome {
   kind: SyncKind;
@@ -33,7 +33,21 @@ export interface SyncOutcome {
   notices: string[];
 }
 
-type Locks = { request: (name: string, opts: { ifAvailable: boolean }, cb: (lock: unknown) => Promise<unknown>) => Promise<unknown> };
+type Locks = { request: (name: string, opts: { ifAvailable?: boolean }, cb: (lock: unknown) => Promise<unknown>) => Promise<unknown> };
+
+/**
+ * Run `fn` holding the device-wide sync lock, WAITING for it if a sync (in any tab) holds it.
+ * Logout and "Clear this device" use this, so they never interleave with a sync.
+ */
+export async function withSyncLockWaiting<T>(fn: () => Promise<T>): Promise<T> {
+  const locks = (globalThis.navigator as { locks?: Locks } | undefined)?.locks;
+  if (!locks) return fn(); // no Web Locks: the epoch check in commitSync still guards the data
+  let out!: T;
+  await locks.request('hohe-sync', {}, async () => {
+    out = await fn();
+  });
+  return out;
+}
 
 /** Run `fn` holding the device-wide sync lock, or return null if another tab holds it. */
 export async function withSyncLock<T>(fn: () => Promise<T>): Promise<T | null> {
@@ -114,7 +128,7 @@ export async function drainQueue(deviceId: string): Promise<SyncOutcome> {
       if (snap.pending.length === 0) {
         if (round === 0) {
           const r = await api.state();
-          await commitSync({ acknowledged: [], rejected: [], placementMap: pruneMap(snap.placementMap), view: r.state });
+          await commitSync({ acknowledged: [], rejected: [], placementMap: pruneMap(snap.placementMap), view: r.state, epoch: snap.epoch });
         }
         return out;
       }
@@ -152,10 +166,16 @@ export async function drainQueue(deviceId: string): Promise<SyncOutcome> {
         rejected,
         placementMap: pruneMap(map),
         view: resp.state as SrvView,
+        epoch: snap.epoch,
       });
     }
     return out;
   } catch (e) {
+    if (e instanceof DeviceClearedError) {
+      out.kind = 'cleared';
+      out.message = e.message;
+      return out;
+    }
     if (e instanceof ApiError) {
       out.kind = e.kind === 'locked' ? 'refused' : e.kind;
       out.message = e.message;

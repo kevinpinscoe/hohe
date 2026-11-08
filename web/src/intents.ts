@@ -61,6 +61,59 @@ function editBase(c: BuildCtx, queued: QueuedOp[], taskId: string, field: string
   return { baseRevision: t.revisions[field] ?? 1 };
 }
 
+/**
+ * What an edit dialog keeps from the moment it opens: each field's value and the base its edit
+ * will build on (the queued op it follows, or the server revision). Submitting against the
+ * baseline means a refresh while the dialog is open never rebases the edit silently: a field
+ * changed elsewhere in the meantime goes to the conflict tray instead of being overwritten.
+ */
+export interface Baseline {
+  taskId: string;
+  values: Record<string, unknown>;
+  bases: Record<string, Pick<Op, 'dependsOn' | 'baseRevision'>>;
+}
+
+const fieldValue = (t: ReturnType<typeof findTask>, f: string): unknown => {
+  if (!t) return '';
+  switch (f) {
+    case 'priority':
+      return t.priority ?? '';
+    case 'deadline':
+      return t.deadline ?? '';
+    case 'effort':
+      return t.effort ?? '';
+    default:
+      return (t as unknown as Record<string, unknown>)[f] ?? '';
+  }
+};
+
+export function editBaseline(c: BuildCtx, taskId: string, fields: string[]): Baseline {
+  const t = findTask(c.display, taskId);
+  const b: Baseline = { taskId, values: {}, bases: {} };
+  for (const f of fields) {
+    b.values[f] = fieldValue(t, f);
+    try {
+      b.bases[f] = editBase(c, [], taskId, f);
+    } catch {
+      /* unknown task: editFrom refuses it */
+    }
+  }
+  return b;
+}
+
+/** Edits for the fields that differ from the baseline, each built on the baseline's base. */
+function editsFrom(c: BuildCtx, base: Baseline, current: Record<string, unknown>, label: string): QueuedOp[] {
+  if (!findTask(c.display, base.taskId)) throw new IntentError('That task is no longer here.');
+  const out: QueuedOp[] = [];
+  for (const [field, value] of Object.entries(current)) {
+    if (!(field in base.values) || String(value ?? '') === String(base.values[field] ?? '')) continue;
+    const b = base.bases[field];
+    if (!b) throw new IntentError('This task is not known on this device yet.');
+    out.push(q(c, { type: 'edit', taskId: base.taskId, field, value, ...b }, label));
+  }
+  return out;
+}
+
 function lifecycle(c: BuildCtx, type: string, taskId: string, label: string, more: Partial<Op> = {}, extra: Partial<QueuedOp> = {}) {
   const open = openPlacement(c.display, taskId);
   return q(c, { type, taskId, basePlacementId: open?.id, ...more }, label, extra);
@@ -110,24 +163,25 @@ export const intents = {
   edit: (taskId: string, field: string, value: unknown): Intent => (c) =>
     edits(c, taskId, { [field]: value }, `Edit ${field}: ${title(c, taskId)}`),
 
-  /** Several fields at once; each is its own edit, chained on the one before it. */
-  editMany: (taskId: string, changes: Record<string, unknown>): Intent => (c) => {
-    if ('title' in changes && !String(changes.title).trim()) throw new IntentError('A task needs a title.');
-    return edits(c, taskId, changes, `Edit: ${title(c, taskId)}`);
+  /** An edit dialog's save: only fields changed from the baseline it opened with. */
+  editFrom: (base: Baseline, current: Record<string, unknown>): Intent => (c) => {
+    if ('title' in current && !String(current.title).trim()) throw new IntentError('A task needs a title.');
+    return editsFrom(c, base, current, `Edit: ${title(c, base.taskId)}`);
   },
 
   changePriority: (taskId: string, letter: Letter | null): Intent => (c) =>
     edits(c, taskId, { priority: letter ?? '' }, `Priority ${letter ?? 'none'}: ${title(c, taskId)}`),
 
-  /** Triage from the Dump: letter, deadline and effort as edits, then an optional day. */
-  assign: (taskId: string, letter: Letter | null, day: Day | null, deadline: Day | '', effort: Effort | undefined): Intent => (c) => {
+  /**
+   * Triage from the Dump: letter, deadline and effort as edits (against the dialog's baseline
+   * when one is given), then an optional day.
+   */
+  assign: (taskId: string, letter: Letter | null, day: Day | null, deadline: Day | '', effort: Effort | undefined, base?: Baseline): Intent => (c) => {
     const t = findTask(c.display, taskId);
     if (!t) throw new IntentError('That task is no longer here.');
-    const changes: Record<string, unknown> = {};
-    if ((t.priority ?? '') !== (letter ?? '')) changes.priority = letter ?? '';
-    if ((t.deadline ?? '') !== deadline) changes.deadline = deadline;
-    if ((t.effort ?? '') !== (effort ?? '')) changes.effort = effort ?? '';
-    const out = edits(c, taskId, changes, `Assign: ${t.title}`);
+    const current = { priority: letter ?? '', deadline, effort: effort ?? '' };
+    const b = base ?? editBaseline(c, taskId, Object.keys(current));
+    const out = editsFrom(c, b, current, `Assign: ${t.title}`);
     if (day) out.push(placing(c, 'assign', taskId, day, `Assign to ${day}: ${t.title}`));
     return out;
   },

@@ -38,6 +38,15 @@ export interface Snapshot {
   attention: Attention[];
   deviceId: string | null;
   placementMap: Record<string, PlacementTarget>;
+  /** Incremented every time the device is cleared. A sync answer read under an older epoch is never stored. */
+  epoch: number;
+}
+
+/** Thrown when a write was refused because the device was cleared since its data was read. */
+export class DeviceClearedError extends Error {
+  constructor() {
+    super('this device was cleared while the request was outstanding');
+  }
 }
 
 let dbp: Promise<IDBDatabase> | null = null;
@@ -94,10 +103,11 @@ function done(tx: IDBTransaction): Promise<void> {
 
 async function readIn(tx: IDBTransaction): Promise<Snapshot> {
   const meta = tx.objectStore('meta');
-  const [confirmed, deviceId, placementMap, pending, attention] = await Promise.all([
+  const [confirmed, deviceId, placementMap, epoch, pending, attention] = await Promise.all([
     req(meta.get('confirmed')),
     req(meta.get('deviceId')),
     req(meta.get('placementMap')),
+    req(meta.get('epoch')),
     req(tx.objectStore('ops').getAll()),
     req(tx.objectStore('attention').getAll()),
   ]);
@@ -105,6 +115,7 @@ async function readIn(tx: IDBTransaction): Promise<Snapshot> {
     confirmed: (confirmed as Confirmed | undefined) ?? null,
     deviceId: (deviceId as string | undefined) ?? null,
     placementMap: (placementMap as Record<string, PlacementTarget> | undefined) ?? {},
+    epoch: (epoch as number | undefined) ?? 0,
     pending: (pending as QueuedOp[]).sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)),
     attention: (attention as Attention[]).sort((a, b) => a.at - b.at),
   };
@@ -173,12 +184,24 @@ export interface SyncCommit {
   rejected: Attention[];
   placementMap: Record<string, PlacementTarget>;
   view: SrvView;
+  epoch: number; // the epoch the request was made under
 }
 
-/** Record a sync answer atomically: drop answered ops, keep rejections, save the new state. */
+/**
+ * Record a sync answer atomically: drop answered ops, keep rejections, save the new state.
+ * Refused (DeviceClearedError, nothing written) if the device was cleared after the request
+ * was made, so a late answer can never restore cleared data.
+ */
 export async function commitSync(c: SyncCommit): Promise<void> {
   const db = await openDb();
   const tx = db.transaction([...STORES], 'readwrite');
+  const finished = done(tx);
+  const now = ((await req(tx.objectStore('meta').get('epoch'))) as number | undefined) ?? 0;
+  if (now !== c.epoch) {
+    tx.abort();
+    await finished.catch(() => undefined);
+    throw new DeviceClearedError();
+  }
   const ops = tx.objectStore('ops');
   for (const seq of c.acknowledged) ops.delete(seq);
   const att = tx.objectStore('attention');
@@ -186,7 +209,7 @@ export async function commitSync(c: SyncCommit): Promise<void> {
   const meta = tx.objectStore('meta');
   meta.put(c.placementMap, 'placementMap');
   meta.put({ view: c.view, at: Date.now() } satisfies Confirmed, 'confirmed');
-  await done(tx);
+  await finished;
 }
 
 /** Move one queued op to the attention list without sending it (it cannot be sent as is). */
@@ -205,18 +228,35 @@ export async function dismissAttention(id: string): Promise<void> {
   await done(tx);
 }
 
-/** Discard pending ops by seq (only after Kevin confirmed, naming the count). */
-export async function discardPending(seqs: number[]): Promise<void> {
-  const db = await openDb();
-  const tx = db.transaction('ops', 'readwrite');
-  for (const s of seqs) tx.objectStore('ops').delete(s);
-  await done(tx);
+export interface ClearResult {
+  cleared: boolean;
+  /** When not cleared: what is outstanding now, including work added after confirmation. */
+  pending: QueuedOp[];
+  attention: Attention[];
 }
 
-/** Clear everything on this device (logout, "Clear this device"). */
-export async function clearDevice(): Promise<void> {
+/**
+ * Clear everything on this device (logout, "Clear this device"), but only if nothing is
+ * outstanding beyond what Kevin confirmed: every pending op and rejected action must be in
+ * `confirmedIds`. Work that has since synced and left the queue is fine; anything new means
+ * the clear is refused and must be confirmed again. Checked and cleared in one transaction.
+ * The epoch moves on, so a sync answer still in flight cannot write afterwards.
+ */
+export async function clearDeviceIfConfirmed(confirmedIds: Set<string>, keepDeviceId = false): Promise<ClearResult> {
   const db = await openDb();
   const tx = db.transaction([...STORES], 'readwrite');
+  const finished = done(tx);
+  const snap = await readIn(tx);
+  const added = [...snap.pending.map((q) => q.op.id), ...snap.attention.map((a) => a.id)].filter((id) => !confirmedIds.has(id));
+  if (added.length > 0) {
+    tx.abort();
+    await finished.catch(() => undefined);
+    return { cleared: false, pending: snap.pending, attention: snap.attention };
+  }
   for (const s of STORES) tx.objectStore(s).clear();
-  await done(tx);
+  const meta = tx.objectStore('meta');
+  meta.put(snap.epoch + 1, 'epoch');
+  if (keepDeviceId && snap.deviceId) meta.put(snap.deviceId, 'deviceId');
+  await finished;
+  return { cleared: true, pending: [], attention: [] };
 }

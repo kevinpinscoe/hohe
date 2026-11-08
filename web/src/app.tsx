@@ -68,6 +68,7 @@ export function App(props: { store: Store }) {
     viewDay,
     now,
     pendingTasks: cur.pendingTasks,
+    editBaseline: (taskId, fields) => store.editBaseline(taskId, fields),
     act: async (intent: Intent, message?: string, opts: ActOptions = {}) => {
       try {
         await store.act(intent);

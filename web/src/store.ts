@@ -6,11 +6,11 @@
 import { api, ApiError } from './api';
 import { plannerDay, type Day } from './dates';
 import * as db from './db';
-import { buildCtx, IntentError, type Intent } from './intents';
+import { buildCtx, editBaseline, IntentError, type Baseline, type Intent } from './intents';
 import { displayState, emptyState, fromServer, pendingByTask, type QueuedOp } from './local';
 import type { State } from './model';
 import type { Build } from './server';
-import { syncNow, type SyncOutcome } from './sync';
+import { syncNow, withSyncLockWaiting, type SyncOutcome } from './sync';
 
 export type Net = 'unknown' | 'ok' | 'unreachable' | 'server-error' | 'refused';
 
@@ -43,7 +43,7 @@ const IDLE_SYNC_MS = 60_000;
 
 export class Store {
   private listeners = new Set<Listener>();
-  private snap: db.Snapshot = { confirmed: null, pending: [], attention: [], deviceId: null, placementMap: {} };
+  private snap: db.Snapshot = { confirmed: null, pending: [], attention: [], deviceId: null, placementMap: {}, epoch: 0 };
   private deviceIdP: Promise<string> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private failures = 0;
@@ -72,7 +72,12 @@ export class Store {
   async start() {
     try {
       this.chan = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('hohe') : null;
-      if (this.chan) this.chan.onmessage = () => void this.reload();
+      if (this.chan)
+        this.chan.onmessage = (e: MessageEvent) => {
+          // Another tab logged out or cleared the device: stop syncing here too.
+          if (e.data === 'logged-out') this.loggedOutElsewhere();
+          void this.reload();
+        };
     } catch {
       this.chan = null;
     }
@@ -121,9 +126,9 @@ export class Store {
     this.set({ pending: this.snap.pending, attention: this.snap.attention, hasServerCopy: !!this.snap.confirmed });
   }
 
-  private announce() {
+  private announce(msg: 'changed' | 'logged-out' = 'changed') {
     try {
-      this.chan?.postMessage('changed');
+      this.chan?.postMessage(msg);
     } catch {
       /* the other tabs reload on focus instead */
     }
@@ -165,7 +170,7 @@ export class Store {
   async sync(): Promise<SyncOutcome | null> {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
-    if (this.status.needsLogin || !this.deviceIdP) {
+    if (this.status.needsLogin || this.leaving || !this.deviceIdP) {
       this.timer = setTimeout(() => void this.sync(), this.nextDelay());
       return null;
     }
@@ -205,6 +210,8 @@ export class Store {
       case 'storage':
         Object.assign(p, { storageError: r.message ?? 'storage error' });
         break;
+      case 'cleared':
+        break; // the device was cleared mid-request; the answer was not stored
     }
     this.lastOutcome = r;
     this.set(p);
@@ -241,29 +248,54 @@ export class Store {
     await this.sync();
   }
 
-  /** Log out and clear this device. Callers must have handled pending changes first. */
-  async logoutAndClear(): Promise<void> {
+  /**
+   * Log out ('logout') or log out and forget this device ('clear').
+   *
+   * Runs under the device-wide sync lock, so it waits for any sync in any tab to finish and no
+   * sync can start until it is done. Immediately before clearing it rechecks what is
+   * outstanding: if a pending change or rejected action exists that is not in `confirmedIds`
+   * (another tab added it after Kevin confirmed), nothing is cleared and the caller must ask
+   * again with the new counts. Clearing moves the epoch on, so a late sync answer is never
+   * stored. Every other tab is told to stop syncing and ask for login.
+   */
+  async leave(mode: 'logout' | 'clear', confirmedIds: Set<string>): Promise<db.ClearResult> {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.leaving = true;
     try {
-      await api.logout();
-    } catch {
-      /* the session ends on the server at its expiry; the device is cleared regardless */
+      const r = await withSyncLockWaiting(() => db.clearDeviceIfConfirmed(confirmedIds, mode === 'logout'));
+      if (!r.cleared) {
+        await this.reload();
+        return r;
+      }
+      try {
+        await api.logout();
+      } catch {
+        // Offline: the server session lasts until it expires. The device's data is gone regardless.
+      }
+      this.deviceIdP = db.deviceId();
+      await this.deviceIdP;
+      await this.reload();
+      this.set({ needsLogin: true, lastSyncAt: null });
+      this.announce('logged-out');
+      return r;
+    } finally {
+      this.leaving = false;
+      if (!this.status.needsLogin) this.schedule(this.nextDelay());
     }
-    await this.clearDevice();
-    this.set({ needsLogin: true });
   }
 
-  async clearDevice(): Promise<void> {
-    await db.clearDevice();
-    await this.reload();
-    this.announce();
+  private leaving = false;
+
+  private loggedOutElsewhere() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.set({ needsLogin: true, lastSyncAt: null });
   }
 
-  async discardPending(): Promise<number> {
-    const seqs = this.snap.pending.map((q) => q.seq as number);
-    await db.discardPending(seqs);
-    await this.reload();
-    this.announce();
-    return seqs.length;
+  /** The baseline an edit dialog keeps from the moment it opens (values and revisions). */
+  editBaseline(taskId: string, fields: string[]): Baseline {
+    return editBaseline(buildCtx(this.snap, this.current.today), taskId, fields);
   }
 
   async dismissAttention(id: string) {
@@ -273,11 +305,13 @@ export class Store {
   }
 
   /** Pending changes and rejected actions as a JSON document, for "Export pending changes". */
-  exportPending(): string {
+  async exportPending(): Promise<string> {
+    this.snap = await db.readAll(); // fresh: another tab may have added work
     return JSON.stringify(
       {
         exportedAt: new Date().toISOString(),
         deviceId: this.snap.deviceId,
+        note: 'pending: saved on this device, not yet on the server. rejected: refused by the server and NOT applied; each entry keeps the full operation.',
         pending: this.snap.pending,
         rejected: this.snap.attention,
       },

@@ -12,7 +12,9 @@ import type { State } from './model';
 import type { SrvConflict } from './server';
 import { AttentionList, ConflictTray, Guard, PendingList, syncSummary } from './status';
 import type { Status } from './store';
-import { persistText } from './settings';
+import { LeaveDevice, outstandingText, persistText } from './settings';
+import { editBaseline } from './intents';
+import type { Store } from './store';
 import { conflict, placement, task, TODAY, view } from './fixtures.test-util';
 
 const ctxFor = (s: State, viewDay = s.today): Ctx => ({
@@ -25,6 +27,8 @@ const ctxFor = (s: State, viewDay = s.today): Ctx => ({
   go: () => {},
   pendingTasks: new Map(),
   now: Date.parse('2026-11-09T15:00:00Z'),
+  editBaseline: (taskId, fields) =>
+    editBaseline({ snap: { confirmed: null, pending: [], attention: [], deviceId: null, placementMap: {}, epoch: 0 }, confirmed: s, display: s, today: s.today }, taskId, fields),
 });
 
 const status = (over: Partial<Status> = {}): Status => ({
@@ -122,6 +126,25 @@ describe('status wording', () => {
     expect(persistText(true)).toMatch(/^Persistent/);
     expect(persistText(false)).toMatch(/^Not persistent/);
     expect(persistText(null)).toMatch(/^Unknown/);
+  });
+});
+
+describe('the logout and clear guard', () => {
+  const att = { id: 'r1', q: q('Number B2: Call the plumber'), status: 'rejected' as const, reason: 'B2 is reserved', at: NOW };
+  it('zero pending and one rejected action is not "nothing outstanding"', () => {
+    expect(outstandingText(0, 1)).toBe('1 rejected action was refused by the server and never applied.');
+    expect(outstandingText(0, 1)).not.toContain('Nothing');
+    const html = render(<LeaveDevice mode="logout" st={status({ attention: [att] })} store={{} as Store} onDone={() => {}} />);
+    expect(html).toContain('1 rejected action was refused by the server');
+    expect(html).not.toContain('Nothing is waiting');
+    expect(html).toContain('Export rejected actions to a file');
+    expect(html).toContain('Export them before they can be discarded.');
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Discard 1 rejected action and log out/);
+    expect(html).not.toContain('Sync now');
+  });
+  it('counts both kinds', () => {
+    expect(outstandingText(2, 1)).toBe('2 changes have not reached the server yet, and 1 rejected action was refused by the server and never applied.');
+    expect(outstandingText(0, 0)).toBe('Nothing is waiting to sync and no rejected actions remain.');
   });
 });
 
