@@ -7,6 +7,8 @@ on:
     paths:
       - "server/**"
       - "web/**"
+      - "Dockerfile"
+      - ".dockerignore"
       - ".github/workflows/app-*.yml"
   workflow_call:
 
@@ -94,3 +96,42 @@ jobs:
           name: web-e2e-results
           path: web/test-results/
           retention-days: 7
+
+  image-build:
+    # The Dockerfile builds and the result runs (amd64 only, not pushed). Publishing,
+    # attestations, the CVE gate and signing happen in app-image.yml after merge.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: hohe:ci
+          build-args: |
+            VERSION=${{ github.sha }}
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          docker run --rm hohe:ci --version | grep -q "${GITHUB_SHA}"
+          mkdir -p "$RUNNER_TEMP/data" && chmod 777 "$RUNNER_TEMP/data"
+          hash=$(printf 'ci smoke password\n' | docker run --rm -i hohe:ci hash-password)
+          printf '{"listen":":8080","dataDir":"/data","persistent":false,"loginPasswordBcrypt":"%s","captureTokens":[],"secureCookies":false}' "$hash" > "$RUNNER_TEMP/config.json"
+          docker run -d --name smoke --read-only --tmpfs /tmp --cap-drop ALL -p 127.0.0.1:8080:8080 \
+            -v "$RUNNER_TEMP/config.json:/config/config.json:ro" -v "$RUNNER_TEMP/data:/data" hohe:ci
+          for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/healthz | grep -q '"ok":true'
+          curl -fsS http://127.0.0.1:8080/sw.js | grep -q "${GITHUB_SHA}"
+          docker stop smoke
+          test "$(docker inspect smoke --format '{{.State.ExitCode}}')" = 0
