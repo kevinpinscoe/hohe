@@ -1,7 +1,7 @@
 {
   "name": "hohe-web",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "HOHE PWA client (Phase 3)",
   "license": "MIT",
   "type": "module",
