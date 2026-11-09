@@ -26,7 +26,7 @@ function serviceWorker(): Plugin {
       const assets = Object.keys(bundle)
         .filter((f) => f !== 'index.html' && !f.endsWith('.map'))
         .map((f) => `/${f}`);
-      const publicFiles = ['/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
+      const publicFiles = ['/favicon.ico', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
       const src = readFileSync(new URL('./sw/sw.js', import.meta.url), 'utf8')
         .replace("const VERSION = '__VERSION__';", `const VERSION = ${JSON.stringify(VERSION)};`)
         .replace('const ASSETS = __ASSETS__;', `const ASSETS = ${JSON.stringify([...assets, ...publicFiles].sort())};`);

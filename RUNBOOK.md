@@ -36,8 +36,12 @@ refuses to start in persistent mode on an absent or wrong data directory.
 
 - Registry: `ghcr.io/kevinpinscoe/hohe`.
 - Tags: `app-sha-<full source commit>`, one per change to `server/`, `web/` or the
-  `Dockerfile` on `main`. There are no semver tags and no `latest`. The spike's images in the
-  same repository are tagged `sha-<commit>`.
+  `Dockerfile` on `main`. There are no semver image tags and no `latest`. The spike's images
+  in the same repository are tagged `sha-<commit>`.
+- Releases: a source release is marked by a signed git tag `vX.Y.Z` on the merge commit in
+  `main` (the first is `v0.1.1`, the favicon release). The tag builds nothing. The release's
+  image is the `app-sha-<tagged commit>` image, still deployed by digest, and
+  `web/package.json` carries the same version.
 - Always deploy by digest:
 
 ```bash

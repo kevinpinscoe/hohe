@@ -7,8 +7,10 @@ name: App Image
 #
 # Tags are "app-sha-<full commit>". The spike publishes "sha-<full commit>" to the same
 # repository, so a commit that touches both never makes one workflow overwrite the other's tag.
-# There are no semver tags, no "latest" and no GitHub releases: the SBOM and provenance are
-# registry attestations bound to the digest (asserted below), as for the spike (POE-71).
+# There are no semver image tags, no "latest" and no GitHub releases: the SBOM and provenance
+# are registry attestations bound to the digest (asserted below), as for the spike (POE-71).
+# A source release is a signed git tag vX.Y.Z on a merge commit; it builds nothing, and its
+# image is that commit's app-sha- image.
 # Every pushed image carries an SBOM and provenance attestation, a Grype CVE gate and a
 # Cosign signature.
 on:
