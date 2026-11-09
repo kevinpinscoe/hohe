@@ -202,7 +202,8 @@ hohe/
 │   │   ├── app.tsx        # shell: capture, navigation, sync status, login, update prompt
 │   │   ├── day.tsx, lists.tsx, dialogs.tsx # the pages and sheets (from the prototype)
 │   │   ├── status.tsx     # sync summary, banners, conflict tray, rejected and pending lists
-│   │   ├── settings.tsx   # versions, storage persistence, settings, guarded logout/clear
+│   │   ├── settings.tsx   # appearance, versions, storage persistence, settings, guarded logout/clear
+│   │   ├── theme.ts       # theme setting: System / Light / Dark, applied and kept current
 │   │   ├── store.ts       # controller: IndexedDB copy, sync scheduling, login, cross-tab reload
 │   │   ├── intents.ts     # user actions → queued server operations and their dependencies
 │   │   ├── sync.ts        # sync engine: device-wide lock, batches, placement-id mapping
@@ -213,6 +214,7 @@ hohe/
 │   │   ├── update.ts      # service-worker registration and the update prompt
 │   │   └── *.test.ts(x)   # unit, queue and rendering tests
 │   ├── sw/sw.js           # service worker source (version and asset list added at build)
+│   ├── public/theme-boot.js # applies the saved theme before the first paint
 │   ├── e2e/               # browser tests and the real-server harness (Playwright)
 │   └── public/            # manifest and icons
 ├── .github/workflows/     # CI (spike; app server, client and image build) and image publishing
@@ -272,6 +274,13 @@ never overwrites a queued change.
   with the new counts. Each clear moves an epoch counter on, so a sync answer still in flight
   is never stored afterwards. The other tabs stop syncing and ask for login. Clear this device
   also forgets the device id.
+- **Theme.** Settings > Appearance offers System (the default, following the device's light or
+  dark setting, live), Light and Dark, stored per device in `localStorage`. A small
+  same-origin script, `public/theme-boot.js`, applies the choice before the first paint, so the
+  wrong theme never flashes; it is a file rather than an inline script because the server's
+  Content-Security-Policy is `script-src 'self'`. Light and Dark exist mainly for LibreWolf
+  with `resistFingerprinting`, which always reports a light system theme. Both palettes meet
+  WCAG 2.2 AA contrast, checked by `src/theme.test.ts` against `styles.css` itself.
 - **Updates.** Each version caches its own complete shell, and a new version waits until
   "Update now" is chosen; HOHE never reloads by itself. The first install replaces the
   Phase 2 spike's service worker at the same address and deletes the spike's cached files.
