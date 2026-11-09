@@ -262,6 +262,8 @@ image.
 | Every request refused "cross-origin" | `publicOrigin` must match the site's origin exactly |
 | PWA will not install or persist | It must be served over HTTPS with a trusted certificate |
 | Changes stay "waiting to sync" | The Sync page shows the reason. Check that `POST /api/sync` reaches the server |
+| Dark mode never appears under System | Some browsers (LibreWolf with `resistFingerprinting`) always report a light system theme. Choose Dark in Settings > Appearance; the choice is per device |
+| Wrong theme flashes at launch | `GET /theme-boot.js` must return the script (it is precached by the service worker). A CSP or proxy change that blocks it leaves the theme to the app, after the first paint |
 
 The image is distroless (no shell). To inspect it, run the binary's subcommands
 (`--version`, `healthcheck`, `verify-snapshot`) or use a debug sidecar.

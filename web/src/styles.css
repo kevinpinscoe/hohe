@@ -1,6 +1,14 @@
 /* HOHE prototype — original styling. Readability and comfortable touch targets first. */
 
+/*
+ * Themes (POE-76). public/theme-boot.js sets data-theme="light" or "dark" on <html> before the
+ * first paint, from the per-device setting (System / Light / Dark); src/theme.ts keeps it current.
+ * The light tokens below are the default; the dark block overrides them. Every text/background
+ * pair meets WCAG 2.2 AA (4.5:1) in both themes; src/theme.test.ts measures them from this file,
+ * so keep each theme's tokens in its own block and in #rrggbb form.
+ */
 :root {
+  color-scheme: light;
   --paper: #fbf8f1;
   --page: #ffffff;
   --ink: #1f2a33;
@@ -8,12 +16,12 @@
   --line: #e2dccf;
   --accent: #1f3a4d;
   --accent-ink: #ffffff;
-  --amber: #b87418;
+  --amber: #986014;
   --a: #a3392b;
   --b: #2b5d8a;
   --c: #4f6e2f;
-  --none: #7a7a7a;
-  --done: #3f7d4f;
+  --none: #6d6d6d;
+  --done: #3d7a4d;
   --warn-bg: #fff4e0;
   --sugg-bg: #eef5f0;
   --radius: 12px;
@@ -26,24 +34,62 @@
   -webkit-text-size-adjust: 100%;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #14191d;
-    --page: #1c2328;
-    --ink: #e8ecee;
-    --muted: #a3afb6;
-    --line: #2f3a41;
-    --accent: #7fb3d5;
-    --accent-ink: #0f1a22;
-    --amber: #e3a650;
-    --a: #f08a7a;
-    --b: #8cbcea;
-    --c: #a9cf7f;
-    --none: #9a9a9a;
-    --done: #7fc996;
-    --warn-bg: #3a2f1c;
-    --sugg-bg: #1f3027;
-  }
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --paper: #14191d;
+  --page: #1c2328;
+  --ink: #e8ecee;
+  --muted: #a3afb6;
+  --line: #2f3a41;
+  --accent: #7fb3d5;
+  --accent-ink: #0f1a22;
+  --amber: #e3a650;
+  --a: #f08a7a;
+  --b: #8cbcea;
+  --c: #a9cf7f;
+  --none: #9a9a9a;
+  --done: #7fc996;
+  --warn-bg: #3a2f1c;
+  --sugg-bg: #1f3027;
+}
+
+/* Fieldsets for radio groups (Settings > Appearance). */
+.choice-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.choice-group legend {
+  padding: 0;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.choice-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--tap);
+  padding: 0 14px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  background: var(--page);
+  cursor: pointer;
+}
+
+.choice-group label:has(input:checked) {
+  border-color: var(--accent);
+  font-weight: 700;
+}
+
+.choice-group input {
+  accent-color: var(--accent);
+  margin: 0;
 }
 
 * {

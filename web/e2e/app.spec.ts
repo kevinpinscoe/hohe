@@ -554,3 +554,69 @@ test('placement-id recovery at the failure boundary: server created it, client n
   await expect(again.getByText('Nothing was rejected.')).toBeVisible();
   await expect(again.getByText('Nothing is waiting.')).toBeVisible();
 });
+
+// ── theme (POE-76) ────────────────────────────────────────────────────────────────────────
+
+const themeOf = (p: Page) => p.evaluate(() => document.documentElement.dataset.theme);
+const themeColor = (p: Page) => p.evaluate(() => document.querySelector('meta[name="theme-color"]')?.getAttribute('content'));
+const paper = (p: Page) => p.evaluate(() => getComputedStyle(document.documentElement).backgroundColor);
+
+async function chooseTheme(p: Page, label: 'System' | 'Light' | 'Dark') {
+  await p.getByRole('button', { name: 'Settings', exact: true }).click();
+  await p.getByRole('radio', { name: label }).check();
+}
+
+test('theme: System follows the OS theme, live, including the theme-color', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await login(page);
+  expect(await themeOf(page)).toBe('light');
+  expect(await themeColor(page)).toBe('#1f3a4d');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect.poll(() => themeOf(page)).toBe('dark');
+  expect(await themeColor(page)).toBe('#14191d');
+  expect(await paper(page)).toBe('rgb(20, 25, 29)');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect.poll(() => themeOf(page)).toBe('light');
+});
+
+test('theme: Light and Dark override the OS (the LibreWolf case) and survive a reload', async ({ page }) => {
+  // resistFingerprinting reports light whatever the OS says; Dark must still win.
+  await page.emulateMedia({ colorScheme: 'light' });
+  await login(page);
+  await chooseTheme(page, 'Dark');
+  expect(await themeOf(page)).toBe('dark');
+  await page.reload();
+  await expect(chip(page)).toBeVisible();
+  expect(await themeOf(page)).toBe('dark');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('radio', { name: 'Dark' })).toBeChecked();
+
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await chooseTheme(page, 'Light');
+  expect(await themeOf(page)).toBe('light');
+  await page.reload();
+  expect(await themeOf(page)).toBe('light');
+});
+
+test('theme: applied before the app runs, and from the offline shell', async ({ page, context }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await login(page);
+  await chooseTheme(page, 'Dark');
+  await waitForOfflineShell(page);
+
+  // With the app's own JavaScript withheld, only theme-boot.js can have set the theme, so it is
+  // in place before the first paint rather than applied later by the app.
+  const p2 = await context.newPage();
+  await p2.emulateMedia({ colorScheme: 'light' });
+  await p2.route(/\/assets\/.*\.js$/, (r) => r.abort());
+  await p2.goto(srv.url);
+  expect(await themeOf(p2)).toBe('dark');
+  expect(await paper(p2)).toBe('rgb(20, 25, 29)');
+  await p2.close();
+
+  // Offline cold load: the boot script comes from the service worker's shell.
+  await context.setOffline(true);
+  await page.reload();
+  expect(await themeOf(page)).toBe('dark');
+  await context.setOffline(false);
+});

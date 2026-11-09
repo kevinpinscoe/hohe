@@ -5,7 +5,47 @@ import { useEffect, useState } from 'preact/hooks';
 import type { Ctx } from './ctx';
 import { intents } from './intents';
 import type { Status, Store } from './store';
+import { applyTheme, readPref, THEME_PREFS, writePref, type ThemePref } from './theme';
 import { APP_VERSION } from './update';
+
+const THEME_LABEL: Record<ThemePref, string> = { system: 'System', light: 'Light', dark: 'Dark' };
+
+/**
+ * Appearance: System / Light / Dark, for this device only (POE-76). Applied at once, saved in
+ * this browser, and restored before the first paint by theme-boot.js.
+ */
+export function AppearanceSetting(props: { initial?: ThemePref }) {
+  const [pref, setPref] = useState<ThemePref>(props.initial ?? readPref());
+  const [saved, setSaved] = useState(true);
+  const choose = (p: ThemePref) => {
+    setPref(p);
+    setSaved(writePref(p));
+    applyTheme(p);
+  };
+  return (
+    <>
+      <fieldset class="choice-group">
+        <legend>Theme on this device</legend>
+        {THEME_PREFS.map((p) => (
+          <label key={p}>
+            <input type="radio" name="theme" value={p} checked={pref === p} onChange={() => choose(p)} />
+            {THEME_LABEL[p]}
+          </label>
+        ))}
+      </fieldset>
+      <p class="hint">
+        {pref === 'system'
+          ? 'Follows this device’s light or dark setting. Some privacy-hardened browsers, such as LibreWolf, always report light; choose Dark there.'
+          : `Always ${THEME_LABEL[pref].toLowerCase()} on this device, whatever the system setting.`}
+      </p>
+      {!saved && (
+        <p class="note warn" role="status">
+          This browser would not save the choice, so it lasts until the app is closed.
+        </p>
+      )}
+    </>
+  );
+}
 
 interface StorageInfo {
   persisted: boolean | null; // null: the browser cannot say
@@ -66,6 +106,9 @@ export function SettingsPage(props: { ctx: Ctx; st: Status; store: Store }) {
   return (
     <section class="page single">
       <h2>Settings</h2>
+
+      <h3 class="sub">Appearance</h3>
+      <AppearanceSetting />
 
       <h3 class="sub">Version</h3>
       <p>
