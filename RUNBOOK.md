@@ -4,9 +4,10 @@ Operational reference for the **HOHE application image**: the Go server (`server
 PWA client (`web/`) embedded. The Phase 2 spike has its own runbook (see
 [Subdirectory Runbooks](#subdirectory-runbooks)).
 
-**Status (2026-11-08):** the image is built and published by CI. It is **not yet deployed**:
-the web1 deployment, its monitoring, backups, the outage and restart tests, a restore
-verification and iPhone acceptance are outstanding under
+**Status (2026-11-08):** the image is built and published by CI, and has been **deployed on web1**
+(tailnet only) since 2026-11-08, image `app-sha-249b481`. Monitoring, daily snapshots with an
+off-host copy, and a restore verification are in place. The outage and restart tests and iPhone
+acceptance are still outstanding under
 [POE-72](https://youtrack.kevininscoe.com/issue/POE-72). Sections that describe one of those
 say so.
 
@@ -199,8 +200,20 @@ a snapshot keeps the table harmlessly, and its next snapshot replaces it.
 5. Check: `/healthz` answers `ok`, and the counts from `verify-snapshot` match what the app
    shows. `sessions.sqlite3` is not part of the snapshot, so devices log in again.
 
-**Restore verification has not yet been demonstrated** for this image. Until it has, these
-steps are the design, not a tested procedure.
+**Restore verification was demonstrated on 2026-11-08** with image `app-sha-249b481`, using
+disposable instances only:
+
+- An off-host copy of a web1 snapshot was restored into a fresh instance: a new data directory
+  from `init-data`, the snapshot as `hohe.sqlite3`, and a temporary password. `/healthz`
+  answered `ok`, login worked, and the export's task, placement and event counts equalled
+  `verify-snapshot`'s.
+- Round trip: tasks were captured into that instance, snapshotted with `hohe snapshot`, and
+  restored into a second instance. Its `/api/export` equalled the first instance's exactly (state
+  and history, apart from `exportedAt`).
+
+Replacing the database of a live instance (steps 1–4 above) has not been exercised. It is
+needed only for a real recovery. The repeatable test is `backup-hohe/restore-test.sh` in the
+operator's host-administration repository.
 
 ## Troubleshooting
 
