@@ -38,3 +38,7 @@
 # Browser-test output (web/)
 **/test-results/
 **/playwright-report/
+
+# Python bytecode (tools/todoist-import)
+__pycache__/
+*.pyc

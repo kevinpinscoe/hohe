@@ -215,6 +215,39 @@ Replacing the database of a live instance (steps 1–4 above) has not been exerc
 needed only for a real recovery. The repeatable test is `backup-hohe/restore-test.sh` in the
 operator's host-administration repository.
 
+## Importing from Todoist
+
+`tools/todoist-import/todoist_import.py` moves open Todoist tasks into HOHE, once. It is
+Python 3 with the standard library only, and runs on the operator's workstation, never in the
+image.
+
+| Step | Command | Writes |
+| --- | --- | --- |
+| Snapshot | `parzival exec --as ai todoist-curl -- python3 todoist_import.py fetch --out SNAP.json` | A new file, mode `0600`. Read-only on Todoist |
+| Dry run | `python3 todoist_import.py plan --snapshot SNAP.json --split SPLIT.json --report PREFIX` | `PREFIX.md` and `PREFIX.json`, the reconciliation. No network calls |
+| Import | `parzival exec --as ansible hohe-login -- python3 todoist_import.py apply --snapshot SNAP.json --split SPLIT.json --hohe-url https://HOST --report PREFIX` | HOHE tasks, and the reconciliation with an apply section |
+
+- **The split file** says where each Todoist project goes:
+  `{"hohe": [...], "donetick": [...], "exclude": {"Project": "reason"}}`. A project in the
+  snapshot that the file does not list stops the run, so nothing is skipped silently. The file
+  holds personal project names, so it is kept with the private archive and never in this
+  repository.
+- **Mapping:**
+  - Each task arrives in the Task Dump with no priority letter and no day, for one fresh
+    triage.
+  - Tags are `todoist`, the project and the section.
+  - Notes hold the description, the comments and a provenance line, which also records the
+    original Todoist priority.
+  - Sub-tasks are flattened and tagged `review`.
+  - Completed and deleted Todoist tasks are never imported.
+- **Reruns are safe.** The HOHE id is `todoist-<Todoist id>`. `apply` skips ids that already
+  exist, and HOHE refuses a reused id, so a rerun neither duplicates a task nor overwrites one
+  edited since. `apply` re-reads HOHE afterwards and fails unless every planned task is present.
+- **Credentials:** the Todoist token reaches `fetch` only through the `todoist-curl` curl
+  config. The HOHE password reaches `apply` only as the file named by
+  `HOHE_LOGIN_PASSWORD_FILE`. Neither appears on a command line.
+- **Tests:** `python3 -m unittest test_todoist_import` (synthetic data).
+
 ## Troubleshooting
 
 | Symptom | Check |
@@ -275,6 +308,7 @@ This repository does not carry an `AGENTS.md` (KDA-31). What an agent needs is a
 - logs, version, and a non-interactive upgrade: set `HOHE_IMAGE`, then
   `docker compose up -d`;
 - snapshot and verification: `hohe snapshot` / `hohe verify-snapshot`;
+- the Todoist import's snapshot and dry run (`fetch`, `plan`). `apply` is run by the operator;
 - the SBOM, provenance, signature and CVE commands.
 
 An agent never handles the login password or a capture token. It sees only their hashes in
