@@ -176,6 +176,31 @@ describe('pages with data', () => {
     expect(day).toContain('waiting to sync');
     expect(render(<ReviewPage ctx={ctx} />)).toContain('Sort the garage');
   });
+  it('a completed task is not shown on the day; open and carried ones still are (POE-85)', () => {
+    const vd = view({
+      tasks: [
+        task('t1', 'Pay the water bill', { priority: 'A', state: 'completed', completedDay: TODAY }),
+        task('t2', 'Call the bank', { priority: 'B' }),
+        task('t3', 'Return the library books', { priority: 'B' }),
+      ],
+      placements: [
+        placement('p-1', 't1', TODAY, { letter: 'A', rank: 1, outcome: 'completed' }),
+        placement('p-2', 't2', TODAY, { letter: 'B', rank: 1 }),
+        placement('p-3', 't3', TODAY, { letter: 'B', rank: 2, outcome: 'forwarded', target: '2026-11-12' }),
+      ],
+    });
+    const day = render(<DayPage ctx={ctxFor(fromServer(vd, TODAY))} />);
+    expect(day).not.toContain('Pay the water bill');
+    expect(day).toContain('Call the bank');
+    expect(day).toContain('Return the library books');
+  });
+  it('a day whose only task is completed reads as empty (POE-85)', () => {
+    const vd = view({
+      tasks: [task('t1', 'Pay the water bill', { priority: 'A', state: 'completed', completedDay: TODAY })],
+      placements: [placement('p-1', 't1', TODAY, { letter: 'A', rank: 1, outcome: 'completed' })],
+    });
+    expect(render(<DayPage ctx={ctxFor(fromServer(vd, TODAY))} />)).toContain('Nothing planned for this day.');
+  });
   it('every dialog renders', () => {
     const specs: DialogSpec[] = [
       { kind: 'actions', taskId: 't1' },
