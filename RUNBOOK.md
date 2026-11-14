@@ -1,3 +1,12 @@
+---
+title: "RUNBOOK — HOHE application"
+tags: [runbook, operations]
+vault_link: "runbooks/home-kinscoe-projects-public-hohe.md"
+source_path: "/home/kinscoe/Projects/public/hohe/RUNBOOK.md"
+---
+
+> 📓 Indexed in the PKM knowledge vault at `runbooks/home-kinscoe-projects-public-hohe.md` (symlink → this file).
+
 # RUNBOOK — HOHE application
 
 Operational reference for the **HOHE application image**: the Go server (`server/`) with the
