@@ -1,3 +1,12 @@
+---
+title: "RUNBOOK — HOHE Phase 2 spike"
+tags: [runbook, operations]
+vault_link: "runbooks/home-kinscoe-projects-public-hohe-spike.md"
+source_path: "/home/kinscoe/Projects/public/hohe/spike/RUNBOOK.md"
+---
+
+> 📓 Indexed in the PKM knowledge vault at `runbooks/home-kinscoe-projects-public-hohe-spike.md` (symlink → this file).
+
 # RUNBOOK — HOHE Phase 2 spike
 
 Operational reference for the **Phase 2 technical spike** image (`spike/`). Its `compose.yml`,
