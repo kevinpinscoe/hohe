@@ -40,7 +40,7 @@ curl -s http://127.0.0.1:8080/healthz
 
 ## Requirements
 
-- Go 1.27.3 or later (the module requires it; `GOTOOLCHAIN=auto` downloads it)
+- Go 1.27.4 or later (the module requires it; `GOTOOLCHAIN=auto` downloads it)
 - No C toolchain: SQLite is the pure-Go `modernc.org/sqlite`
 
 ## Configuration
