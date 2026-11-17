@@ -456,6 +456,7 @@ test('zero pending and one rejected action: guarded, export offered, discard exp
   await blockSync(ctxB);
   await a.getByRole('checkbox', { name: 'Complete: Pay the rent' }).click(); // B2 becomes reserved
   await expect.poll(async () => (await srv.serverState()).placements.some((p) => p.outcome === 'completed')).toBe(true);
+  await expect(a.locator('li.row', { hasText: 'Pay the rent' })).toHaveCount(0); // a completed task leaves the day list (POE-85)
   await b.locator('li.row', { hasText: 'Call the plumber' }).getByRole('button', { name: /^Priority B\./ }).click();
   await b.getByRole('dialog').getByRole('button', { name: 'B2', exact: true }).click(); // stale: B2 looks free
   await ctxB.unroute('**/api/sync');

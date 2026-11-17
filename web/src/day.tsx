@@ -24,7 +24,8 @@ export function DayPage(props: { ctx: Ctx }) {
   const { s, viewDay } = ctx;
   const [reorder, setReorder] = useState(false);
   const [draft, setDraft] = useState('');
-  const list = sortForDay(placementsOn(s, viewDay).filter((p) => p.outcome !== 'deleted'));
+  // Completed and deleted entries are left off the list: a checked-off task disappears (POE-85).
+  const list = sortForDay(placementsOn(s, viewDay).filter((p) => p.outcome !== 'deleted' && p.outcome !== 'completed'));
   const aCount = list.filter((p) => p.letter === 'A' && p.outcome === null).length;
   const isToday = viewDay === s.today;
   const isPast = viewDay < s.today;
@@ -55,7 +56,7 @@ export function DayPage(props: { ctx: Ctx }) {
             </button>
           )}
         </div>
-        {isPast && <p class="note">A past day. Closed entries stay exactly as they ended.</p>}
+        {isPast && <p class="note">A past day. Closed entries stay exactly as they ended; completed ones are not shown.</p>}
         {rolloverWaiting && (
           <p class="note">
             The server has not rolled over to today yet (it is still on {shortLabel(s.serverDay)}). Unfinished tasks carry over
@@ -64,7 +65,7 @@ export function DayPage(props: { ctx: Ctx }) {
         )}
         {reorder && (
           <p class="note">
-            Move open tasks within their letter. Numbers held by completed or closed entries stay put, so nothing is numbered
+            Move open tasks within their letter. Numbers held by completed (hidden) or closed entries stay put, so nothing is numbered
             twice.
           </p>
         )}
@@ -138,7 +139,7 @@ function MonthCalendar(props: { ctx: Ctx }) {
   const { y, m } = parts(viewDay);
   const { firstWeekday, length } = monthShape(y, m);
   const cells: (number | null)[] = [...Array(firstWeekday).fill(null), ...Array.from({ length }, (_, i) => i + 1)];
-  const busy = new Set(s.placements.filter((p) => p.outcome !== 'deleted').map((p) => p.day));
+  const busy = new Set(s.placements.filter((p) => p.outcome !== 'deleted' && p.outcome !== 'completed').map((p) => p.day));
   const tabMonth = (mm: number) => (mm === parts(s.today).m && y === parts(s.today).y ? s.today : makeDay(y, mm, 1));
   return (
     <div class="calendar-block">
@@ -219,9 +220,6 @@ function Legend() {
   return (
     <ul class="legend" aria-label="Marks">
       <li>
-        <span>✓</span> Completed
-      </li>
-      <li>
         <span>→</span> Forwarded or carried
       </li>
       <li>
@@ -252,20 +250,17 @@ function TaskRow(props: { ctx: Ctx; pl: Placement; reorder: boolean }) {
 
   return (
     <li class={`row ${closed ? 'closed' : ''} outcome-${pl.outcome ?? 'open'}`}>
+      {/* Completed rows are not rendered (POE-85); the toast's Undo is the way back. */}
       <button
-        class={`check ${pl.outcome === 'completed' ? 'done' : ''}`}
+        class="check"
         role="checkbox"
-        aria-checked={pl.outcome === 'completed'}
-        aria-label={pl.outcome === 'completed' ? `Completed: ${t.title}` : `Complete: ${t.title}`}
-        disabled={closed && pl.outcome !== 'completed'}
+        aria-checked={false}
+        aria-label={`Complete: ${t.title}`}
+        disabled={closed}
         onClick={() => {
-          if (pl.outcome === 'completed') {
-            if (pl.day >= s.today) ctx.act(intents.reopen(t.id), 'Reopened');
-          } else if (!closed) ctx.act(intents.complete(t.id), `Done: ${t.title}`, { undo: intents.reopen(t.id) });
+          if (!closed) ctx.act(intents.complete(t.id), `Done: ${t.title}`, { undo: intents.reopen(t.id) });
         }}
-      >
-        {pl.outcome === 'completed' ? '✓' : ''}
-      </button>
+      ></button>
       <button
         class={`rank letter-${pl.letter ?? 'none'}`}
         aria-label={`Priority ${rank}. Change priority or number`}
